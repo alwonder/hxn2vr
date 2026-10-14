@@ -1,0 +1,17 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "win64",
+      "displayName": "Windows x64 (Visual Studio 2022)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/win64"
+    }
+  ],
+  "buildPresets": [
+    { "name": "win64-debug", "configurePreset": "win64", "configuration": "Debug" },
+    { "name": "win64-release", "configurePreset": "win64", "configuration": "Release" }
+  ]
+}
