@@ -142,14 +142,17 @@ int VR_SimTicks(vr_simclock_t *c, double dt, int paused) {
 	constexpr double kEps = 1e-9;  // a frame of exactly one tick must not lose it to rounding
 	constexpr int kMaxSimTicks = 4;
 	if (!c) return 0;
-	if (paused || !(dt > 0.0)) return 0;
+	if (paused || !std::isfinite(dt) || !(dt > 0.0)) return 0;
 	c->acc += dt;
-	int n = 0;
-	while (c->acc >= kTick - kEps) {
-		c->acc -= kTick;
-		if (n < kMaxSimTicks) ++n;
-	}
-	if (c->acc < 0.0) c->acc = 0.0;
+	// O(1) whatever dt is (host_framerate can bypass the 0.05 s clamp): whole ticks due, capped,
+	// remainder (< one tick) kept.
+	const double ticks = c->acc / kTick;
+	const double whole = std::floor(ticks + kEps / kTick);
+	const int n = whole >= kMaxSimTicks ? kMaxSimTicks : static_cast<int>(whole);
+	double rest = (ticks - whole) * kTick;
+	if (!(rest >= 0.0)) rest = 0.0;
+	if (rest >= kTick) rest = 0.0;
+	c->acc = rest;
 	return n;
 }
 

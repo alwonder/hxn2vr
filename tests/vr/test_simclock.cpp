@@ -1,6 +1,8 @@
 #include "doctest.h"
 #include "vr_api.h"
 
+#include <limits>
+
 namespace {
 
 int run_frames(vr_simclock_t& c, int frames, double dt, int paused = 0) {
@@ -62,4 +64,23 @@ TEST_CASE("simclock: non-positive dt gives no ticks") {
 	CHECK(VR_SimTicks(&c, 0.0, 0) == 0);
 	CHECK(VR_SimTicks(&c, -1.0, 0) == 0);
 	CHECK(c.acc == doctest::Approx(0.0));
+}
+
+TEST_CASE("simclock: a huge dt is O(1), capped at 4 ticks, leaves acc within one tick") {
+	vr_simclock_t c{};
+	CHECK(VR_SimTicks(&c, 1e9, 0) == 4);
+	CHECK(c.acc >= 0.0);
+	CHECK(c.acc < 1.0 / 72.0);
+}
+
+TEST_CASE("simclock: non-finite dt gives no ticks and leaves the accumulator unchanged") {
+	vr_simclock_t c{};
+	CHECK(VR_SimTicks(&c, 1.0 / 90.0, 0) == 0);
+	const double before = c.acc;
+	CHECK(VR_SimTicks(&c, std::numeric_limits<double>::infinity(), 0) == 0);
+	CHECK(c.acc == before);
+	CHECK(VR_SimTicks(&c, std::numeric_limits<double>::quiet_NaN(), 0) == 0);
+	CHECK(c.acc == before);
+	CHECK(VR_SimTicks(&c, -std::numeric_limits<double>::infinity(), 0) == 0);
+	CHECK(c.acc == before);
 }

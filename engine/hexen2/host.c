@@ -714,6 +714,9 @@ static void Host_GetConsoleCommands (void)
 
 
 //#define FPS_20
+#ifdef FPS_20	/* HXVR: the fixed-tick VR server loop is only hooked into the non-FPS_20 _Host_Frame */
+#error "HXVR: VR requires the non-FPS_20 host loop"
+#endif
 
 /*
 ==================

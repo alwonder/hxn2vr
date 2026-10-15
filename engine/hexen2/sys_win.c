@@ -23,6 +23,7 @@
 #include <mmsystem.h>
 #include "resource.h"
 #include "debuglog.h"
+#include "vr_glue.h"	/* HXVR */
 
 
 #define MIN_MEM_ALLOC	0x1000000
@@ -821,7 +822,12 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	    else
 	    {
 		/* yield the CPU for a little while when paused, minimized or not focused */
-		if ((cl.paused && !ActiveApp) || Minimized || block_drawing)
+		if (VRG_SimActive() && !block_drawing)
+		{
+			/* HXVR: the desktop window is usually unfocused in VR; the VR runtime paces
+			 * frames in VR_BeginFrame, so neither sleep nor skip drawing here. */
+		}
+		else if ((cl.paused && !ActiveApp) || Minimized || block_drawing)
 		{
 			SleepUntilInput (PAUSE_SLEEP);
 			scr_skipupdate = 1;		/* no point in bothering to draw */
@@ -837,7 +843,7 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 
 		Host_Frame (time);
 
-		if (time < sys_throttle.value)
+		if (time < sys_throttle.value && !VRG_SimActive())	/* HXVR: VR runtime paces frames */
 			Sleep (1);
 
 		oldtime = newtime;

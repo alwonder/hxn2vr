@@ -70,6 +70,8 @@ static void VRG_Start (void)
 	}
 	else
 	{
+		if (q_strcasecmp(vr_backend.string, "openxr"))
+			Con_Printf ("VR: unknown vr_backend \"%s\", using openxr\n", vr_backend.string);
 		p.backend = VR_BACKEND_OPENXR;
 		bname = "openxr";
 	}

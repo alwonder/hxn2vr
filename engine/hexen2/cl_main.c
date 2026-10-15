@@ -23,6 +23,7 @@
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "cdaudio.h"
+#include "vr_glue.h"	/* HXVR */
 
 // we need to declare some mouse variables here, because the menu system
 // references them even when on a unix system.
@@ -470,7 +471,9 @@ static float CL_LerpPoint (void)
 
 	f = cl.mtime[0] - cl.mtime[1];
 
-	if (!f || cl_nolerp.integer || cls.timedemo || sv.active)
+	/* HXVR: in VR the loopback server ticks at 72 Hz while the client renders at the headset
+	 * rate, so interpolate like netplay instead of snapping to the newest message. */
+	if (!f || cl_nolerp.integer || cls.timedemo || (sv.active && !VRG_SimActive()))
 	{
 		cl.time = cl.mtime[0];
 		return 1;
