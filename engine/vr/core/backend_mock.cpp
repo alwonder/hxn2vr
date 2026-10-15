@@ -1,5 +1,6 @@
 // backend_mock.cpp -- fake headset: fixed eye height, optional yaw sway, paced to mockHz.
 #include "backend.hpp"
+#include "gl_ext.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -19,6 +20,7 @@ constexpr double kPi = 3.14159265358979323846;
 class MockBackend final : public Backend {
 public:
 	explicit MockBackend(const GlExt* gl) : gl_(gl) {}
+	~MockBackend() override { deleteTextures(); }
 
 	bool start(const StartParams& p, std::string& err) override {
 		if (!(p.renderScale > 0.0f) || !(p.eyeHeightM > 0.0f)) {
@@ -29,10 +31,11 @@ public:
 		size_ = glm::ivec2(scaled(kBaseEyeW, p.renderScale), scaled(kBaseEyeH, p.renderScale));
 		paced_ = false;
 		updatePoses(0.0);
+		createTextures();
 		return true;
 	}
 
-	void stop() override {}
+	void stop() override { deleteTextures(); }
 
 	FrameInfo beginFrame(double now) override {
 		pace();
@@ -45,14 +48,38 @@ public:
 	Fov eyeFov(int) const override { return Fov{-kHalfFov, kHalfFov, kHalfFov, -kHalfFov}; }
 	glm::ivec2 eyeSize() const override { return size_; }
 
-	// Eye textures (GL_RGBA8) are created only when a GlExt is supplied; GlExt has no entry
-	// points yet, so texture creation is deferred to the GL task and this returns 0 for now.
-	unsigned acquireEye(int) override { return 0; }
+	// One GL_RGBA8 texture per eye (stands in for a swapchain image); 0 without a GlExt.
+	unsigned acquireEye(int eye) override { return tex_[eye == 0 ? 0 : 1]; }
 	void releaseEye(int) override {}
 	void endFrame() override {}
 
 private:
 	static int scaled(int base, float scale) { return static_cast<int>(std::lround(base * scale)); }
+
+	// Requires the GL context to be current. Restores the caller's GL_TEXTURE_2D binding (the
+	// engine caches its current texture).
+	void createTextures() {
+		deleteTextures();
+		if (!gl_) return;
+		gl::GLint prev = 0;
+		gl_->glGetIntegerv(gl::kTextureBinding2D, &prev);
+		gl_->glGenTextures(2, tex_);
+		for (unsigned t : tex_) {
+			gl_->glBindTexture(gl::kTexture2D, t);
+			gl_->glTexParameteri(gl::kTexture2D, gl::kTextureMinFilter, static_cast<gl::GLint>(gl::kLinear));
+			gl_->glTexParameteri(gl::kTexture2D, gl::kTextureMagFilter, static_cast<gl::GLint>(gl::kLinear));
+			gl_->glTexParameteri(gl::kTexture2D, gl::kTextureWrapS, static_cast<gl::GLint>(gl::kClampToEdge));
+			gl_->glTexParameteri(gl::kTexture2D, gl::kTextureWrapT, static_cast<gl::GLint>(gl::kClampToEdge));
+			gl_->glTexImage2D(gl::kTexture2D, 0, static_cast<gl::GLint>(gl::kRgba8), size_.x, size_.y, 0,
+			                  gl::kRgba, gl::kUnsignedByte, nullptr);
+		}
+		gl_->glBindTexture(gl::kTexture2D, static_cast<gl::GLuint>(prev));
+	}
+
+	void deleteTextures() {
+		if (gl_ && tex_[0]) gl_->glDeleteTextures(2, tex_);
+		tex_[0] = tex_[1] = 0;
+	}
 
 	void updatePoses(double t) {
 		head_.pos = glm::vec3(0.0f, params_.eyeHeightM, 0.0f);
@@ -81,6 +108,7 @@ private:
 	}
 
 	const GlExt* gl_;
+	unsigned tex_[2] = {0, 0};
 	StartParams params_{1.0f, 1.65f, false, 0.0f};
 	glm::ivec2 size_{kBaseEyeW, kBaseEyeH};
 	Pose head_{glm::vec3(0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f)};

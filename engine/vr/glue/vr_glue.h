@@ -32,4 +32,14 @@ qboolean VRG_HostFrameBegin (void);
  * session is not rendering/focused: the server does not advance). */
 int VRG_ServerTicks (double dt);
 
+/* SCR_UpdateScreen, after SCR_SetUpToDrawConsole: the VR path. If this host frame's VR frame is
+ * rendering, renders both eyes, mirrors them into the window (vr_mirror), ends the VR frame and
+ * presents the window; returns true (the flat path is skipped). Otherwise (VR off, frame not
+ * rendering, or this frame's VR frame already submitted) ends a pending non-rendering frame and
+ * returns false: the flat path draws the window. */
+qboolean VRG_UpdateScreen (void);
+qboolean VRG_EyeActive (void);	/* true while an eye's R_RenderView runs */
+void VRG_SetupEyeGL (void);	/* R_SetupGL in an eye pass: eye viewport + eye projection */
+void VRG_EyeFrustum (float normals[4][3]);	/* R_SetFrustum in an eye pass: left, right, bottom, top */
+
 #endif /* HXVR_VR_GLUE_H */

@@ -35,6 +35,7 @@ extern	unsigned short	ramps[3][256];
 
 void V_Init (void);
 void V_RenderView (void);
+void V_SetupRefdef (void);	/* HXVR: refdef for this frame, without the refresh */
 void V_CalcBlend (void);
 float V_CalcRoll (vec3_t angles, vec3_t velocity);
 void V_UpdatePalette (void);

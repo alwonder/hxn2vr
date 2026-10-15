@@ -10,13 +10,24 @@
 
 namespace hxvr {
 
-struct GlExt;   // GL entry points; defined in a later task. Backends only keep the pointer.
+struct GlExt;   // GL entry points (gl_ext.hpp). Backends keep the pointer; it must outlive them.
 
 struct Pose { glm::vec3 pos; glm::quat rot; };   // metres, OpenXR axes, relative to the floor
 struct Fov { float left, right, up, down; };      // radians, left/down < 0
 struct FrameInfo { bool render; bool focused; bool lost; };
 struct StartParams { float renderScale; float eyeHeightM; bool mockMotion; float mockHz; };
 
+// Contract (the caller, vr_module.cpp, guarantees it; backends may rely on it):
+//  - Per frame: beginFrame -> [acquireEye/releaseEye for each eye, only if FrameInfo::render]
+//    -> endFrame. endFrame is called after EVERY beginFrame, also when not rendering (OpenXR
+//    must still xrEndFrame with zero layers); a backend whose beginFrame did not begin a
+//    runtime frame treats that endFrame as a no-op. An acquired eye is always released before
+//    endFrame.
+//  - stop() is idempotent. A failed start() is never followed by stop(): the destructor must
+//    clean up whatever a partial start() created.
+//  - GL work (eye textures, swapchains) happens on the thread with the engine's GL context
+//    current, in start/stop/acquire/release/endFrame and the destructor.
+//  - The GlExt passed to the factory outlives the backend (vr_module.cpp owns it).
 class Backend {
 public:
 	virtual ~Backend() = default;

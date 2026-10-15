@@ -38,6 +38,14 @@ void quake_angle_vectors(const float angles[3], glm::vec3& forward, glm::vec3& r
 	up = glm::vec3(cr * sp * cy + -sr * -sy, cr * sp * sy + -sr * cy, cr * cp);
 }
 
+// Angle in degrees wrapped to (-180, 180].
+float normalize180(float a) {
+	float r = std::fmod(a, 360.0f);
+	if (r > 180.0f) r -= 360.0f;
+	else if (r <= -180.0f) r += 360.0f;
+	return r;
+}
+
 }  // namespace
 
 extern "C" {
@@ -132,6 +140,14 @@ void VR_FrustumNormals(const float angles[3], const vr_fov_t *fov, float out[4][
 		out[i][1] = n[i].y;
 		out[i][2] = n[i].z;
 	}
+}
+
+// View angles of an eye: head pitch and roll; yaw = body yaw + head yaw, wrapped to (-180, 180].
+void VR_ComposeViewAngles(float body_yaw, const float head_angles[3], float out[3]) {
+	const float pitch = head_angles[0], yaw = head_angles[1], roll = head_angles[2];
+	out[0] = pitch;
+	out[1] = normalize180(body_yaw + yaw);
+	out[2] = roll;
 }
 
 // Fixed 72 Hz server clock. Accumulates the render dt and returns how many 1/72 s ticks are due,

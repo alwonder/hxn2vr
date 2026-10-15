@@ -67,6 +67,7 @@
 #ifdef PLATFORM_WINDOWS
 #include "winquake.h"
 #endif
+#include "vr_glue.h"	/* HXVR */
 
 
 static qboolean	scr_initialized;	// ready to draw
@@ -1226,6 +1227,8 @@ WARNING: be very careful calling this from elsewhere, because the refresh
 needs almost the entire 256k of stack space!
 ==================
 */
+static void SCR_Draw2D (void);	/* HXVR */
+
 void SCR_UpdateScreen (void)
 {
 	if (block_drawing)
@@ -1280,12 +1283,26 @@ void SCR_UpdateScreen (void)
 //
 	SCR_SetUpToDrawConsole ();
 
+	if (VRG_UpdateScreen ())	/* HXVR: VR frame (eyes, mirror, present) */
+		return;
+
 #if FULLSCREEN_INTERMISSIONS
 	// no need to draw view in fullscreen intermission screens
 	if (!cl.intermission)
 #endif
 		V_RenderView ();
 
+	SCR_Draw2D ();	/* HXVR: 2D block moved into SCR_Draw2D */
+
+	V_UpdatePalette ();
+
+	GL_EndRendering ();
+}
+
+/* HXVR: the 2D part of SCR_UpdateScreen (status bar, console, menus...), also drawn into the VR
+ * panel (Task 1.8) */
+static void SCR_Draw2D (void)
+{
 	GL_Set2D ();
 	SCR_TileClear ();	// draw any areas not covered by the refresh
 
@@ -1347,9 +1364,10 @@ void SCR_UpdateScreen (void)
 		}
 #endif	/* H2W */
 	}
+}
 
-	V_UpdatePalette ();
-
-	GL_EndRendering ();
+void SCR_Draw2DForVR (void)	/* HXVR */
+{
+	SCR_Draw2D ();
 }
 

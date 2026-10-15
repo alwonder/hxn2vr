@@ -19,6 +19,7 @@
  */
 
 #include "quakedef.h"
+#include "vr_glue.h"	/* HXVR */
 
 entity_t	r_worldentity;
 vec3_t		modelorg, r_entorigin;
@@ -1364,6 +1365,9 @@ static void R_DrawViewModel (void)
 	dlight_t	*dl;
 	entity_t	*e;
 
+	if (VRG_Active ())	/* HXVR: no view model in VR (hand-held weapon comes in stage 3) */
+		return;
+
 	e = &cl.viewent;
 
 	if (!e->model)
@@ -1609,6 +1613,14 @@ static void R_SetFrustum (void)
 {
 	int		i;
 
+	if (VRG_EyeActive ())	/* HXVR: asymmetric per-eye frustum */
+	{
+		float	n[4][3];
+		VRG_EyeFrustum (n);
+		for (i = 0; i < 4; i++)
+			VectorCopy (n[i], frustum[i].normal);
+	}
+	else	/* HXVR */
 	if (r_refdef.fov_x == 90)
 	{
 		// front side is visible
@@ -1693,6 +1705,9 @@ static void R_SetupGL (void)
 	glMatrixMode_fp(GL_PROJECTION);
 	glLoadIdentity_fp ();
 
+	if (VRG_EyeActive ())	/* HXVR: eye viewport and projection */
+		VRG_SetupEyeGL ();
+	else {	/* HXVR */
 	x  =  r_refdef.vrect.x * glwidth/vid.width;
 	x2 = (r_refdef.vrect.x + r_refdef.vrect.width) * glwidth/vid.width;
 	y  = (vid.height - r_refdef.vrect.y) * glheight/vid.height;
@@ -1713,6 +1728,7 @@ static void R_SetupGL (void)
 
 	glViewport_fp (glx + x, gly + y2, w, h);
 	GL_SetFrustum (r_refdef.fov_x, r_refdef.fov_y);
+	}	/* HXVR */
 
 	if (mirror)
 	{

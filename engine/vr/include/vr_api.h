@@ -43,7 +43,14 @@ int  VR_BeginFrame(vr_frame_t *out);
 void VR_GetHeadPose(vr_pose_t *out);
 void VR_GetEye(int eye, vr_pose_t *pose, vr_fov_t *fov);
 void VR_GetEyeSize(int *w, int *h);
-void VR_BeginEye(int eye);
+/* Per frame, after VR_BeginFrame returned render != 0, for eye 0 then 1:
+ * VR_BeginEye acquires the eye image, binds its framebuffer and sets the viewport; returns 1 if
+ * the eye target is bound (draw into it), 0 if not (do not draw). VR_EndEye mirrors the eye into
+ * the window framebuffer (mirror_mode 0 none, 1 eye 0 fills the window, 2 both side by side;
+ * win_w x win_h pixels), rebinds the window framebuffer and releases the eye.
+ * VR_EndFrame ends the frame; it must follow every VR_BeginFrame (also when not rendering). A
+ * frame left pending is ended by the next VR_BeginFrame / VR_Stop. */
+int  VR_BeginEye(int eye);
 void VR_EndEye(int eye, int mirror_mode, int win_w, int win_h);
 void VR_EndFrame(void);
 void VR_BeginPanel(int w, int h);

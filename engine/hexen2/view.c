@@ -27,6 +27,7 @@
  */
 
 #include "quakedef.h"
+#include "vr_glue.h"	/* HXVR */
 
 static	float	v_dmg_time, v_dmg_roll, v_dmg_pitch;
 
@@ -922,6 +923,8 @@ static void V_CalcRefdef (void)
 		bob = V_CalcBob ();
 	else  // no bobbing when you fly
 		bob = 1;
+	if (VRG_Active ())	/* HXVR: no view bob in VR */
+		bob = 0;
 
 	// refresh position
 	VectorCopy (ent->origin, r_refdef.vieworg);
@@ -936,8 +939,11 @@ static void V_CalcRefdef (void)
 	r_refdef.vieworg[2] += 1.0/32;
 
 	VectorCopy (cl.viewangles, r_refdef.viewangles);
+	if (!VRG_Active ())	/* HXVR: no view roll / idle sway in VR (the head sets the view) */
+	{
 	V_CalcViewRoll ();
 	V_AddIdle ();
+	}	/* HXVR */
 
 	// offsets
 	angles[PITCH] = -ent->angles[PITCH];	// because entity pitches are
@@ -947,6 +953,7 @@ static void V_CalcRefdef (void)
 
 	AngleVectors (angles, forward, right, up);
 
+	if (!VRG_Active ())	/* HXVR: no scr_ofs* view offsets in VR */
 	for (i = 0; i < 3; i++)
 		r_refdef.vieworg[i] += scr_ofsx.value*forward[i]
 					+ scr_ofsy.value*right[i]
@@ -1007,6 +1014,7 @@ static void V_CalcRefdef (void)
 		view->drawflags = (view->drawflags & MLS_MASKOUT) | 0;
 
 	// set up the refresh position
+	if (!VRG_Active ())	/* HXVR: no punch angle kick in VR */
 	VectorAdd (r_refdef.viewangles, cl.punchangle, r_refdef.viewangles);
 
 	// smooth out stair step ups
@@ -1041,11 +1049,8 @@ The player's clipping box goes from (-16 -16 -24) to (16 16 32) from
 the entity origin, so any view position inside that will be valid
 ==================
 */
-void V_RenderView (void)
+void V_SetupRefdef (void)	/* HXVR: V_RenderView without the refresh (VR renders per eye) */
 {
-	if (con_forcedup)
-		return;
-
 	// don't allow cheats in multiplayer
 	if (cl.maxclients > 1)
 	{
@@ -1062,6 +1067,14 @@ void V_RenderView (void)
 		if (!cl.paused /*&& (cl.maxclients > 1 || Key_GetDest() == key_game)*/)
 			V_CalcRefdef ();
 	}
+}	/* HXVR */
+
+void V_RenderView (void)	/* HXVR: body moved to V_SetupRefdef */
+{
+	if (con_forcedup)
+		return;
+
+	V_SetupRefdef ();	/* HXVR */
 
 	R_PushDlights ();
 

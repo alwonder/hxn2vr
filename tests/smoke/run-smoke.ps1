@@ -62,7 +62,10 @@ $lines.Add('quit')
 $shots = Join-Path $data1 'shots'
 if (Test-Path -LiteralPath $shots) { Get-ChildItem -LiteralPath $shots -Filter *.tga | Remove-Item -Force }
 
-$argList = @('-basedir', $GameDir, '-window', '-width', '1280', '-height', '720', '+exec', $cfgName) + $ExtraArgs
+# ExtraArgs go before +exec: stuffcmds queues the + commands in order and `exec` inserts the cfg
+# text in front of whatever is still queued, so + commands placed after +exec would only run
+# after the whole script (i.e. after quit).
+$argList = @('-basedir', $GameDir, '-window', '-width', '1280', '-height', '720') + $ExtraArgs + @('+exec', $cfgName)
 $argStr = ($argList | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' '
 Write-Host "run-smoke: $Exe $argStr"
 

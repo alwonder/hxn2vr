@@ -26,6 +26,7 @@
 
 void SCR_Init (void);
 void SCR_UpdateScreen (void);
+void SCR_Draw2DForVR (void);	/* HXVR: 2D layer of SCR_UpdateScreen, for the VR panel */
 void SCR_UpdateWholeScreen (void);
 
 void SCR_CenterPrint (const char *str);
