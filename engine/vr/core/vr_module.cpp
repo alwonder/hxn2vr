@@ -2,13 +2,7 @@
 // by later tasks. Must not include engine headers.
 #include "vr_api.h"
 
-#include <cstring>
-
 namespace {
-void set_identity(float out[16]) {
-	std::memset(out, 0, sizeof(float) * 16);
-	out[0] = out[5] = out[10] = out[15] = 1.0f;
-}
 void zero3(float out[3]) { out[0] = out[1] = out[2] = 0.0f; }
 }  // namespace
 
@@ -42,11 +36,6 @@ void VR_BeginPanel(int, int) {}
 void VR_EndPanel(void) {}
 void VR_DrawPanelQuad(const float[4][3]) {}
 
-void VR_ProjectionMatrix(const vr_fov_t *, float, float, float out[16]) { set_identity(out); }
-void VR_QuakeViewMatrix(const float[3], const float[3], float out[16]) { set_identity(out); }
-void VR_FrustumNormals(const float[3], const vr_fov_t *, float out[4][3]) {
-	for (int i = 0; i < 4; ++i) zero3(out[i]);
-}
 int  VR_SimTicks(vr_simclock_t *, double, int) { return 0; }
 void VR_ComposeViewAngles(float, const float[3], float out[3]) { zero3(out); }
 float VR_BodyYawFromSetAngle(float, float) { return 0.0f; }

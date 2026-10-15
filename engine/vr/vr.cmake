@@ -40,6 +40,7 @@ add_executable(vr_tests
     ${CMAKE_SOURCE_DIR}/tests/vr/main.cpp
     ${CMAKE_SOURCE_DIR}/tests/vr/test_smoke.cpp
     ${CMAKE_SOURCE_DIR}/tests/vr/test_tracking.cpp
+    ${CMAKE_SOURCE_DIR}/tests/vr/test_projection.cpp
 )
 target_compile_features(vr_tests PRIVATE cxx_std_20)
 set_target_properties(vr_tests PROPERTIES CXX_EXTENSIONS OFF MSVC_RUNTIME_LIBRARY "${HXVR_MSVC_RUNTIME}")

@@ -2,9 +2,13 @@
 #include "vr_api.h"
 
 #include <glm/glm.hpp>
+#include <glm/ext/matrix_clip_space.hpp>
+#include <glm/ext/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 #include <cmath>
+#include <cstring>
 
 namespace {
 
@@ -12,6 +16,27 @@ namespace {
 glm::vec3 quake_from_tracking(const glm::vec3& v) { return glm::vec3(-v.z, -v.x, v.y); }
 
 constexpr float kRadToDeg = 57.295779513082320876798f;
+
+// Same as TurnVector in engine/hexen2/gl_rmain.c: forward rotated towards side by angle (degrees).
+glm::vec3 turn_vector(const glm::vec3& forward, const glm::vec3& side, float angle_deg) {
+	const double a = angle_deg * (3.14159265358979323846 / 180.0);
+	return static_cast<float>(std::cos(a)) * forward + static_cast<float>(std::sin(a)) * side;
+}
+
+// Quake AngleVectors (engine/h2shared/mathlib.c); angles = [PITCH, YAW, ROLL] degrees.
+void quake_angle_vectors(const float angles[3], glm::vec3& forward, glm::vec3& right, glm::vec3& up) {
+	const double k = 3.14159265358979323846 * 2.0 / 360.0;
+	double angle = angles[1] * k;
+	const float sy = static_cast<float>(std::sin(angle)), cy = static_cast<float>(std::cos(angle));
+	angle = angles[0] * k;
+	const float sp = static_cast<float>(std::sin(angle)), cp = static_cast<float>(std::cos(angle));
+	angle = angles[2] * k;
+	const float sr = static_cast<float>(std::sin(angle)), cr = static_cast<float>(std::cos(angle));
+
+	forward = glm::vec3(cp * cy, cp * sy, -sp);
+	right = glm::vec3(-1 * (sr * sp * cy + cr * -sy), -1 * (sr * sp * sy + cr * cy), -1 * (sr * cp));
+	up = glm::vec3(cr * sp * cy + -sr * -sy, cr * sp * sy + -sr * cy, cr * cp);
+}
 
 }  // namespace
 
@@ -65,6 +90,48 @@ void VR_EyeOrigin(const float feet[3], float body_yaw, const vr_vec3_t *eye_pos,
 	out[1] = feet[1] + (d.x * s + d.y * c) * upm;
 	// Vertical: absolute eye height above the floor (anchor.y ignored).
 	out[2] = feet[2] + eye_pos->y * upm;
+}
+
+// Column-major, equivalent to glFrustum(tan(l)*n, tan(r)*n, tan(d)*n, tan(u)*n, n, f).
+void VR_ProjectionMatrix(const vr_fov_t *fov, float znear, float zfar, float out[16]) {
+	const float l = std::tan(fov->left) * znear, r = std::tan(fov->right) * znear;
+	const float b = std::tan(fov->down) * znear, t = std::tan(fov->up) * znear;
+	const glm::mat4 m = glm::frustumRH_NO(l, r, b, t, znear, zfar);
+	std::memcpy(out, glm::value_ptr(m), sizeof(float) * 16);
+}
+
+// Equivalent to the R_SetupGL modelview sequence in engine/hexen2/gl_rmain.c.
+void VR_QuakeViewMatrix(const float org[3], const float angles[3], float out[16]) {
+	const glm::vec3 X(1, 0, 0), Y(0, 1, 0), Z(0, 0, 1);
+	glm::mat4 m(1.0f);
+	m = glm::rotate(m, glm::radians(-90.0f), X);  // put Z going up
+	m = glm::rotate(m, glm::radians(90.0f), Z);
+	m = glm::rotate(m, glm::radians(-angles[2]), X);  // roll
+	m = glm::rotate(m, glm::radians(-angles[0]), Y);  // pitch
+	m = glm::rotate(m, glm::radians(-angles[1]), Z);  // yaw
+	m = glm::translate(m, glm::vec3(-org[0], -org[1], -org[2]));
+	std::memcpy(out, glm::value_ptr(m), sizeof(float) * 16);
+}
+
+// out = left, right, bottom, top; inward-pointing unit normals (same order as frustum[0..3] in
+// R_SetFrustum, fov == 90 path). Each edge turns the view direction by (90 - edge half-angle)
+// towards the inside of the frustum.
+void VR_FrustumNormals(const float angles[3], const vr_fov_t *fov, float out[4][3]) {
+	glm::vec3 fwd, right, up;
+	quake_angle_vectors(angles, fwd, right, up);
+	const float l = fov->left * kRadToDeg, r = fov->right * kRadToDeg;
+	const float u = fov->up * kRadToDeg, d = fov->down * kRadToDeg;
+	const glm::vec3 n[4] = {
+		turn_vector(fwd, right, 90.0f + l),  // left edge: turn towards +right
+		turn_vector(fwd, right, r - 90.0f),  // right edge: turn towards -right
+		turn_vector(fwd, up, 90.0f + d),     // bottom edge: turn towards +up
+		turn_vector(fwd, up, u - 90.0f),     // top edge: turn towards -up
+	};
+	for (int i = 0; i < 4; ++i) {
+		out[i][0] = n[i].x;
+		out[i][1] = n[i].y;
+		out[i][2] = n[i].z;
+	}
 }
 
 }  // extern "C"

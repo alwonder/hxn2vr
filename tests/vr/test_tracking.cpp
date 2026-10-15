@@ -1,4 +1,5 @@
 #include "doctest.h"
+#include "quake_test_math.hpp"
 #include "vr_api.h"
 
 #include <glm/glm.hpp>
@@ -15,27 +16,6 @@ bool vec_eq(const float a[3], V3 b, float eps = 1e-3f) {
 	for (int i = 0; i < 3; ++i)
 		if (std::fabs(a[i] - b.v[i]) > eps) return false;
 	return true;
-}
-
-// Copy of the formula in engine/h2shared/mathlib.c AngleVectors (angles = [PITCH, YAW, ROLL], degrees).
-void quake_angle_vectors(const float angles[3], float forward[3], float right[3], float up[3]) {
-	const double k = 3.14159265358979323846 * 2.0 / 360.0;
-	double angle = angles[1] * k;
-	const float sy = (float)std::sin(angle), cy = (float)std::cos(angle);
-	angle = angles[0] * k;
-	const float sp = (float)std::sin(angle), cp = (float)std::cos(angle);
-	angle = angles[2] * k;
-	const float sr = (float)std::sin(angle), cr = (float)std::cos(angle);
-
-	forward[0] = cp * cy;
-	forward[1] = cp * sy;
-	forward[2] = -sp;
-	right[0] = -1 * (sr * sp * cy + cr * -sy);
-	right[1] = -1 * (sr * sp * sy + cr * cy);
-	right[2] = -1 * (sr * cp);
-	up[0] = (cr * sp * cy + -sr * -sy);
-	up[1] = (cr * sp * sy + -sr * cy);
-	up[2] = cr * cp;
 }
 
 vr_quat_t quat_axis_deg(glm::vec3 axis, float deg) {
@@ -91,7 +71,7 @@ TEST_CASE("angles: property over 200 random rotations") {
 
 		float angles[3], f[3], r[3], u[3], ef[3], er[3], eu[3];
 		VR_TrackingToQuakeAngles(&vq, angles);
-		quake_angle_vectors(angles, f, r, u);
+		quake_test::angle_vectors(angles, f, r, u);
 		rotated_to_quake(vq, {0, 0, -1}, ef);
 		rotated_to_quake(vq, {1, 0, 0}, er);
 		rotated_to_quake(vq, {0, 1, 0}, eu);
