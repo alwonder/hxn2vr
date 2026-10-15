@@ -2,8 +2,12 @@
 #include "gl_ext.hpp"
 #include "targets.hpp"
 #include "vr_api.h"
+#include "vr_module_testing.hpp"
+
+#include <glm/gtc/quaternion.hpp>
 
 #include <cstring>
+#include <memory>
 #include <string>
 
 namespace {
@@ -113,5 +117,71 @@ TEST_CASE("mock without GL: eyes report no target, frames end cleanly") {
 	VR_EndFrame();
 	VR_EndFrame();   // no pending frame: no-op
 	VR_Stop();
+	CHECK(VR_IsRunning() == 0);
+}
+
+namespace {
+
+// Records the Backend calls the module makes; render flag per frame is set by the test.
+struct CallLog {
+	int begins = 0, ends = 0, acquires = 0, releases = 0, stops = 0;
+	bool render = true;
+};
+
+class FakeBackend final : public hxvr::Backend {
+public:
+	explicit FakeBackend(CallLog *log) : log_(log) {}
+	bool start(const hxvr::StartParams &, std::string &) override { return true; }
+	void stop() override { ++log_->stops; }
+	hxvr::FrameInfo beginFrame(double) override {
+		++log_->begins;
+		return hxvr::FrameInfo{log_->render, true, false};
+	}
+	hxvr::Pose headPose() const override { return hxvr::Pose{glm::vec3(0.0f), glm::quat(1, 0, 0, 0)}; }
+	hxvr::Pose eyePose(int) const override { return headPose(); }
+	hxvr::Fov eyeFov(int) const override { return hxvr::Fov{-0.7f, 0.7f, 0.7f, -0.7f}; }
+	glm::ivec2 eyeSize() const override { return glm::ivec2(64, 64); }
+	unsigned acquireEye(int) override {
+		++log_->acquires;
+		return 0;
+	}
+	void releaseEye(int) override { ++log_->releases; }
+	void endFrame() override { ++log_->ends; }
+
+private:
+	CallLog *log_;
+};
+
+}  // namespace
+
+TEST_CASE("eye API refuses eyes in a non-rendering frame; endFrame follows every beginFrame") {
+	CallLog log;
+	VR_TestInjectBackend(std::make_unique<FakeBackend>(&log));
+	vr_frame_t f{};
+
+	log.render = false;
+	REQUIRE(VR_BeginFrame(&f) == 1);
+	CHECK(f.render == 0);
+	CHECK(VR_BeginEye(0) == 0);
+	CHECK(log.acquires == 0);   // contract: no acquireEye when not rendering
+	VR_EndEye(0, 2, 640, 480);
+	CHECK(log.releases == 0);
+	VR_EndFrame();
+	CHECK(log.ends == 1);
+
+	log.render = true;
+	REQUIRE(VR_BeginFrame(&f) == 1);
+	VR_BeginEye(0);   // no GL: target not bound, but the eye image is acquired
+	CHECK(log.acquires == 1);
+	CHECK(VR_BeginEye(0) == 0);   // same eye twice: refused
+	CHECK(log.acquires == 1);
+	// eye 0 left acquired, frame left pending (longjmp): the next frame cleans up first
+	REQUIRE(VR_BeginFrame(&f) == 1);
+	CHECK(log.releases == 1);
+	CHECK(log.ends == 2);
+	CHECK(log.begins == 3);
+	VR_Stop();   // pending frame ended before stop
+	CHECK(log.ends == 3);
+	CHECK(log.stops == 1);
 	CHECK(VR_IsRunning() == 0);
 }

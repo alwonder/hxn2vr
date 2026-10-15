@@ -57,9 +57,11 @@ static int		vrg_swap_interval;
 static int		vrg_dbg_frames, vrg_dbg_ticks;
 static double		vrg_dbg_start;
 
+/* Module messages can arrive mid-frame (e.g. from VR_BeginEye): Con_Printf may re-enter
+ * SCR_UpdateScreen while cls.signon != SIGNONS, so only safe prints here. */
 static void VRG_HostPrint (const char *msg)
 {
-	Con_Printf ("%s\n", msg);
+	Con_SafePrintf ("%s\n", msg);
 }
 
 /* GL loader for the module: wglGetProcAddress (extensions, GL > 1.1), falling back to the
@@ -219,7 +221,7 @@ qboolean VRG_HostFrameBegin (void)
 			vrg_dbg_frames++;
 			if (now - vrg_dbg_start >= 1.0)
 			{
-				Con_Printf ("vr: %d frames, %d server ticks\n", vrg_dbg_frames, vrg_dbg_ticks);
+				Con_SafePrintf ("vr: %d frames, %d server ticks\n", vrg_dbg_frames, vrg_dbg_ticks);	/* frame pending */
 				vrg_dbg_frames = vrg_dbg_ticks = 0;
 				vrg_dbg_start = now;
 			}

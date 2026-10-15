@@ -1812,7 +1812,7 @@ static void R_Clear (void)
 		gldepthmax = 0.5;
 		glDepthFunc_fp (GL_LEQUAL);
 	}
-	else if (gl_ztrick.integer)
+	else if (gl_ztrick.integer && !VRG_EyeActive ())	/* HXVR: per-eye FBOs need a real depth clear */
 	{
 		static int trickframe;
 

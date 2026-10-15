@@ -72,6 +72,7 @@ Write-Host "run-smoke: $Exe $argStr"
 $proc = Start-Process -FilePath $Exe -ArgumentList $argStr -WorkingDirectory $GameDir -PassThru
 if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
     try { $proc.Kill() } catch {}
+    try { [void]$proc.WaitForExit(15000) } catch {}   # let it release its files (debug log) before callers clean up
     Fail "run-smoke: timeout after $TimeoutSec s, process killed"
     exit 1
 }

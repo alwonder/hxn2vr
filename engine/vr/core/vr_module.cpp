@@ -5,6 +5,7 @@
 #include "backend.hpp"
 #include "gl_ext.hpp"
 #include "targets.hpp"
+#include "vr_module_testing.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -25,6 +26,7 @@ vr_host_t g_host{};
 // Frame bookkeeping: guarantees the Backend contract (endFrame after every beginFrame, every
 // acquired eye released) even when the engine longjmps (Host_Error) out of a frame.
 bool g_framePending = false;
+bool g_frameRender = false;   // FrameInfo::render of the pending frame
 bool g_eyeAcquired[2] = {false, false};
 bool g_eyeBound[2] = {false, false};
 bool g_warnedTargets = false;
@@ -73,6 +75,7 @@ void finish_frame() {
 	}
 	if (g_framePending) g_backend->endFrame();
 	g_framePending = false;
+	g_frameRender = false;
 }
 
 }  // namespace
@@ -131,6 +134,7 @@ void VR_Stop(void) {
 	}
 	g_targets.reset();   // GL context is still current (VR stops before the window goes away)
 	g_framePending = false;
+	g_frameRender = false;
 }
 int  VR_IsRunning(void) { return g_backend ? 1 : 0; }
 int  VR_BeginFrame(vr_frame_t *out) {
@@ -139,6 +143,7 @@ int  VR_BeginFrame(vr_frame_t *out) {
 	finish_frame();   // a frame left pending (longjmp, or the screen was not drawn) ends first
 	const hxvr::FrameInfo fi = g_backend->beginFrame(host_time());
 	g_framePending = true;
+	g_frameRender = fi.render;
 	if (out) { out->render = fi.render; out->focused = fi.focused; out->lost = fi.lost; }
 	return 1;
 }
@@ -159,7 +164,8 @@ void VR_GetEyeSize(int *w, int *h) {
 	if (h) *h = s.y;
 }
 int  VR_BeginEye(int eye) {
-	if (!g_backend || !g_framePending || eye < 0 || eye > 1 || g_eyeAcquired[eye]) return 0;
+	// Contract: eyes are acquired only in a frame that renders.
+	if (!g_backend || !g_framePending || !g_frameRender || eye < 0 || eye > 1 || g_eyeAcquired[eye]) return 0;
 	const unsigned tex = g_backend->acquireEye(eye);
 	g_eyeAcquired[eye] = true;
 	if (!tex || !g_targets) return 0;
@@ -194,3 +200,12 @@ void VR_PanelCorners(const float[3], float, float, float, float, float out[4][3]
 }
 
 }  // extern "C"
+
+void VR_TestInjectBackend(std::unique_ptr<hxvr::Backend> backend) {
+	VR_Stop();
+	g_host = vr_host_t{};
+	g_glLoaded = false;
+	g_backend = std::move(backend);
+	g_framePending = false;
+	g_frameRender = false;
+}

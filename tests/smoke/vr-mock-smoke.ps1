@@ -17,7 +17,8 @@
   working directory), deleted before each run and removed afterwards.
 
   The VR cvars are archived (vr_enabled, vr_backend, vr_mirror), so <GameDir>\data1\config.cfg
-  is backed up before each run and restored afterwards: no VR state leaks into later runs.
+  is backed up before each run and restored afterwards; if there was none, the one the run
+  wrote is deleted. No VR state leaks into later runs.
 
 .EXAMPLE
   powershell -File tests/smoke/vr-mock-smoke.ps1 -Exe build/win64/Debug/hxn2vr.exe
@@ -33,6 +34,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# `-File ... -Scenarios a,b` arrives as the single string "a,b"
+$Scenarios = @($Scenarios | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 function Resolve-Abs([string]$p) {
     if ([System.IO.Path]::IsPathRooted($p)) { return $p }
@@ -59,7 +62,8 @@ $all = [ordered]@{
 
 function Test-VrLog([string]$path) {
     if (-not (Test-Path -LiteralPath $path)) { return "no console log at $path" }
-    $vrLines = @(Get-Content -LiteralPath $path | Where-Object { $_ -match '^VR:' })
+    # case-sensitive: vr_debug_ticks prints lowercase "vr:" statistics lines
+    $vrLines = @(Get-Content -LiteralPath $path | Where-Object { $_ -cmatch '^VR:' })
     if (-not ($vrLines -contains 'VR: started (mock)')) { return "log has no 'VR: started (mock)' line" }
     # Expected VR: lines are the start/stop notices; anything else is an error report.
     $bad = @($vrLines | Where-Object { $_ -ne 'VR: started (mock)' -and $_ -ne 'VR: stopped' })
@@ -79,7 +83,8 @@ foreach ($s in $Scenarios) {
     }
     Write-Host "vr-mock-smoke ($s): $($sc.Commands -join '; ')"
 
-    if (Test-Path -LiteralPath $log) { Remove-Item -LiteralPath $log -Force }
+    if (Test-Path -LiteralPath $log) { Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue }
+    if (Test-Path -LiteralPath $log) { throw "cannot remove stale $log (engine still running?)" }
     $cfgBackup = $null
     if (Test-Path -LiteralPath $config) {
         $cfgBackup = [System.IO.File]::ReadAllBytes($config)
@@ -101,8 +106,13 @@ foreach ($s in $Scenarios) {
         }
     }
     finally {
-        if ($null -ne $cfgBackup) { [System.IO.File]::WriteAllBytes($config, $cfgBackup) }
-        if (Test-Path -LiteralPath $log) { Remove-Item -LiteralPath $log -Force }
+        # Clean-up must not abort the remaining scenarios (e.g. a log still locked by a killed engine).
+        try {
+            if ($null -ne $cfgBackup) { [System.IO.File]::WriteAllBytes($config, $cfgBackup) }
+            elseif (Test-Path -LiteralPath $config) { Remove-Item -LiteralPath $config -Force }   # written by this run
+        }
+        catch { Write-Warning "vr-mock-smoke: could not restore ${config}: $_" }
+        Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath (Join-Path $GameDir "data1\smoke_vr_$s.cfg") -Force -ErrorAction SilentlyContinue
     }
 
