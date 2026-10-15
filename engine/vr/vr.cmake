@@ -21,6 +21,7 @@ set_target_properties(openxr_loader PROPERTIES MSVC_RUNTIME_LIBRARY "${HXVR_MSVC
 # --- module ---
 add_library(hxvr STATIC
     ${HXVR_DIR}/core/vr_module.cpp
+    ${HXVR_DIR}/core/vr_math.cpp
 )
 target_compile_features(hxvr PUBLIC cxx_std_20)
 set_target_properties(hxvr PROPERTIES CXX_EXTENSIONS OFF MSVC_RUNTIME_LIBRARY "${HXVR_MSVC_RUNTIME}")
@@ -38,6 +39,7 @@ enable_testing()
 add_executable(vr_tests
     ${CMAKE_SOURCE_DIR}/tests/vr/main.cpp
     ${CMAKE_SOURCE_DIR}/tests/vr/test_smoke.cpp
+    ${CMAKE_SOURCE_DIR}/tests/vr/test_tracking.cpp
 )
 target_compile_features(vr_tests PRIVATE cxx_std_20)
 set_target_properties(vr_tests PROPERTIES CXX_EXTENSIONS OFF MSVC_RUNTIME_LIBRARY "${HXVR_MSVC_RUNTIME}")

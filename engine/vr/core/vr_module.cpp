@@ -42,15 +42,6 @@ void VR_BeginPanel(int, int) {}
 void VR_EndPanel(void) {}
 void VR_DrawPanelQuad(const float[4][3]) {}
 
-// Hexen II eye is 50 units above the origin (feet): the player's real eye height maps to 50 units.
-float VR_UnitsPerMetre(float eye_height_m, float world_scale) {
-	if (eye_height_m <= 0.0f) return 0.0f;
-	return 50.0f / eye_height_m * world_scale;
-}
-
-void VR_TrackingToQuakePos(const vr_vec3_t *, float, float out[3]) { zero3(out); }
-void VR_TrackingToQuakeAngles(const vr_quat_t *, float out[3]) { zero3(out); }
-void VR_EyeOrigin(const float[3], float, const vr_vec3_t *, const vr_vec3_t *, float, float out[3]) { zero3(out); }
 void VR_ProjectionMatrix(const vr_fov_t *, float, float, float out[16]) { set_identity(out); }
 void VR_QuakeViewMatrix(const float[3], const float[3], float out[16]) { set_identity(out); }
 void VR_FrustumNormals(const float[3], const vr_fov_t *, float out[4][3]) {
