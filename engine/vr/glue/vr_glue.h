@@ -20,8 +20,16 @@ extern	cvar_t	vr_mock_motion;
 extern	cvar_t	vr_mock_hz;
 extern	cvar_t	vr_debug_ticks;
 
-void VRG_Init (void);		/* end of Host_Init: registers cvars */
+void VRG_Init (void);		/* Host_Init, before config.cfg/hexen.rc are executed: registers cvars */
 void VRG_Shutdown (void);	/* Host_Shutdown: stops the module if running */
-qboolean VRG_Active (void);	/* true while VR rendering is active */
+qboolean VRG_Active (void);	/* true while VR rendering is active: running and last frame had render != 0 */
+qboolean VRG_SimActive (void);	/* true while the VR session is running (fixed-tick server; also when not rendering) */
+
+/* Start of _Host_Frame (after setjmp): starts/stops VR from vr_enabled, calls VR_BeginFrame,
+ * saves the frame flags. Returns VRG_Active(). */
+qboolean VRG_HostFrameBegin (void);
+/* Number of fixed 1/72 s server ticks to run for a render frame of dt seconds (0 when the
+ * session is not rendering/focused: the server does not advance). */
+int VRG_ServerTicks (double dt);
 
 #endif /* HXVR_VR_GLUE_H */

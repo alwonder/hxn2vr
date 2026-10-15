@@ -110,7 +110,6 @@ void VR_BeginPanel(int, int) {}
 void VR_EndPanel(void) {}
 void VR_DrawPanelQuad(const float[4][3]) {}
 
-int  VR_SimTicks(vr_simclock_t *, double, int) { return 0; }
 void VR_ComposeViewAngles(float, const float[3], float out[3]) { zero3(out); }
 float VR_BodyYawFromSetAngle(float, float) { return 0.0f; }
 void VR_PanelCorners(const float[3], float, float, float, float, float out[4][3]) {

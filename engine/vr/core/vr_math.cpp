@@ -134,4 +134,23 @@ void VR_FrustumNormals(const float angles[3], const vr_fov_t *fov, float out[4][
 	}
 }
 
+// Fixed 72 Hz server clock. Accumulates the render dt and returns how many 1/72 s ticks are due,
+// at most kMaxSimTicks; whatever is left over beyond that is discarded (no catch-up burst).
+// While paused nothing is accumulated and no ticks are due.
+int VR_SimTicks(vr_simclock_t *c, double dt, int paused) {
+	constexpr double kTick = 1.0 / 72.0;
+	constexpr double kEps = 1e-9;  // a frame of exactly one tick must not lose it to rounding
+	constexpr int kMaxSimTicks = 4;
+	if (!c) return 0;
+	if (paused || !(dt > 0.0)) return 0;
+	c->acc += dt;
+	int n = 0;
+	while (c->acc >= kTick - kEps) {
+		c->acc -= kTick;
+		if (n < kMaxSimTicks) ++n;
+	}
+	if (c->acc < 0.0) c->acc = 0.0;
+	return n;
+}
+
 }  // extern "C"

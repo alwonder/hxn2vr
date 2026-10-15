@@ -668,7 +668,8 @@ static qboolean Host_FilterTime (float time)
 {
 	realtime += time;
 
-	if (!cls.timedemo && realtime - oldrealtime < 1.0/72.0)
+	/* HXVR: in VR the host runs at the headset rate, no 72 Hz cap */
+	if (!cls.timedemo && !VRG_SimActive() && realtime - oldrealtime < 1.0/72.0)
 		return false;		// framerate is too high
 
 	host_frametime = realtime - oldrealtime;
@@ -678,7 +679,7 @@ static qboolean Host_FilterTime (float time)
 		host_frametime = host_framerate.value;
 	else
 	{	// don't allow really long or short frames
-		if (host_frametime > 0.05 && !sys_adaptive.integer)
+		if (host_frametime > 0.05 && (!sys_adaptive.integer || VRG_SimActive()))	/* HXVR: adaptive stepping is off in VR */
 			host_frametime = 0.05;
 		if (host_frametime < 0.001)
 			host_frametime = 0.001;
@@ -813,10 +814,14 @@ static void _Host_Frame (float time)
 	int			pass1, pass2, pass3;
 #if !defined(FPS_20)
 	double	save_host_frametime,total_host_frametime;
+	qboolean	vr_sim;		/* HXVR: fixed-tick server while a VR session runs */
+	int		adaptive, ticks;	/* HXVR */
 #endif
 
 	if (setjmp(host_abort))
 		return;			// something bad happened, or the server disconnected
+
+	VRG_HostFrameBegin ();	/* HXVR: start/stop VR from vr_enabled, VR_BeginFrame */
 
 // keep the random time dependent
 	rand ();
@@ -871,7 +876,9 @@ static void _Host_Frame (float time)
 #else
 
 	save_host_frametime = total_host_frametime = host_frametime;
-	if (sys_adaptive.integer)
+	vr_sim = VRG_SimActive ();			/* HXVR */
+	adaptive = sys_adaptive.integer && !vr_sim;	/* HXVR: VR behaves as sys_adaptive 0 */
+	if (adaptive)
 	{
 		if (host_frametime > 0.05)
 			host_frametime = 0.05;
@@ -882,7 +889,19 @@ static void _Host_Frame (float time)
 
 	do
 	{
-		if (sv.active)
+		if (vr_sim)	/* HXVR: n fixed 1/72 s server ticks per render frame */
+		{
+			if (sv.active)
+			{
+				for (ticks = VRG_ServerTicks(host_frametime); ticks > 0; ticks--)
+				{
+					host_frametime = 1.0/72.0;
+					Host_ServerFrame ();
+				}
+				host_frametime = save_host_frametime;	/* render dt for the client side */
+			}
+		}
+		else if (sv.active)
 			Host_ServerFrame ();
 
 	//-------------------
@@ -903,7 +922,7 @@ static void _Host_Frame (float time)
 		R_UpdateParticles ();
 		CL_UpdateEffects ();
 
-		if (!sys_adaptive.integer)
+		if (!adaptive)	/* HXVR: was !sys_adaptive.integer */
 			break;
 
 		total_host_frametime -= 0.05;
