@@ -22,6 +22,7 @@ cvar_t	vr_mock_hz = {"vr_mock_hz", "90", CVAR_NONE};
 cvar_t	vr_debug_ticks = {"vr_debug_ticks", "0", CVAR_NONE};
 
 static void VRG_Recenter_f (void);
+static void VRG_Recenter (void);
 
 void VRG_Init (void)
 {
@@ -47,11 +48,13 @@ static vr_frame_t	vrg_frame;		/* flags of the last VR_BeginFrame */
 static qboolean		vrg_active;		/* running && last frame had render != 0 */
 static qboolean		vrg_frame_pending;	/* VR_BeginFrame done, VR_EndFrame not yet */
 
-/* body yaw (degrees, (-180, 180]) and the recenter anchor (tracking space, x/z used): the view yaw
- * is body_yaw + head yaw. Keyboard/mouse turn the body; the head adds its own rotation. */
+/* body yaw (degrees; not normalized: after VRG_PostInput it is in [0, 360) via anglemod, every
+ * consumer normalizes) and the recenter anchor (tracking space, x/z used): the view yaw is
+ * body_yaw + head yaw. Keyboard/mouse turn the body; the head adds its own rotation. */
 static float		vrg_body_yaw;
 static qboolean		vrg_body_valid;		/* body_yaw taken from cl.viewangles since VR started */
 static vr_vec3_t	vrg_anchor;
+static qboolean		vrg_recenter_pending;	/* auto-recenter on the first rendered frame after VR starts */
 
 /* current eye pass (VRG_UpdateScreen) */
 static qboolean		vrg_eye_active;
@@ -175,6 +178,7 @@ static void VRG_Start (void)
 	vrg_body_yaw = 0;
 	vrg_body_valid = false;
 	memset (&vrg_anchor, 0, sizeof(vrg_anchor));
+	vrg_recenter_pending = true;
 	vrg_dbg_frames = vrg_dbg_ticks = 0;
 	vrg_dbg_start = Sys_DoubleTime ();
 	vrg_frame_pending = false;
@@ -226,6 +230,12 @@ qboolean VRG_HostFrameBegin (void)
 	{
 		vrg_frame_pending = true;
 		vrg_active = (vrg_frame.render != 0);
+		if (vrg_active && vrg_recenter_pending)
+		{
+			/* the tracking origin is the stage centre, not where the player stands */
+			vrg_recenter_pending = false;
+			VRG_Recenter ();
+		}
 
 		if (vr_debug_ticks.integer)
 		{
@@ -316,21 +326,27 @@ void VRG_OnSetAngle (void)
 	vrg_body_valid = true;
 }
 
-/* vr_recenter: the head's current position (x, z) becomes the player's origin */
-static void VRG_Recenter_f (void)
+/* the head's current position (x, z) becomes the player's origin (vr_recenter, and automatically
+ * on the first rendered frame after VR starts). Safe print: may run mid-frame. */
+static void VRG_Recenter (void)
 {
 	vr_pose_t	pose;
 
+	VR_GetHeadPose (&pose);
+	vrg_anchor.x = pose.pos.x;
+	vrg_anchor.y = 0;
+	vrg_anchor.z = pose.pos.z;
+	Con_SafePrintf ("VR: recentered\n");
+}
+
+static void VRG_Recenter_f (void)
+{
 	if (!VR_IsRunning())
 	{
 		Con_Printf ("VR: not running\n");
 		return;
 	}
-	VR_GetHeadPose (&pose);
-	vrg_anchor.x = pose.pos.x;
-	vrg_anchor.y = 0;
-	vrg_anchor.z = pose.pos.z;
-	Con_Printf ("VR: recentered\n");
+	VRG_Recenter ();
 }
 
 /* ---- per-eye rendering ---- */

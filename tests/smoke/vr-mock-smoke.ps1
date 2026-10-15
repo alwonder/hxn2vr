@@ -12,7 +12,8 @@
        expected to FAIL now; it only runs with -IncludePending.
 
   check_shot --stereo alone cannot prove VR ran, so every run also uses -condebug and the
-  console log must contain `VR: started (mock)` and no `VR:` error line. The log is written to
+  console log must contain `VR: started (mock)` and no `VR:` error line (`VR: recentered` is allowed;
+  scenario a requires it: the auto-recenter on the first rendered frame). The log is written to
   <basedir>\debug_h2.log (userdir == basedir on Windows; run-smoke also uses GameDir as the
   working directory), deleted before each run and removed afterwards.
 
@@ -57,18 +58,19 @@ $config = Join-Path $GameDir 'data1\config.cfg'
 $vrArgs = @('-condebug', '+vr_backend', 'mock', '+vr_mirror', '2', '+vr_enabled', '1') + @($ExtraArgs | ForEach-Object { $_ -split ' ' } | Where-Object { $_ })
 
 $all = [ordered]@{
-    a = @{ Commands = @('map demo1'); Stereo = $true; Pending = $false }
+    a = @{ Commands = @('map demo1'); Stereo = $true; Pending = $false; Recenter = $true }   # auto-recenter must have run
     b = @{ Commands = @('map demo1', 'changelevel demo2'); Stereo = $true; Pending = $false }
     c = @{ Commands = @('echo vr-mock-smoke: console only'); Stereo = $false; Pending = $true }   # until Task 1.8
 }
 
-function Test-VrLog([string]$path) {
+function Test-VrLog([string]$path, [bool]$requireRecenter) {
     if (-not (Test-Path -LiteralPath $path)) { return "no console log at $path" }
     # case-sensitive: vr_debug_ticks prints lowercase "vr:" statistics lines
     $vrLines = @(Get-Content -LiteralPath $path | Where-Object { $_ -cmatch '^VR:' })
     if (-not ($vrLines -contains 'VR: started (mock)')) { return "log has no 'VR: started (mock)' line" }
-    # Expected VR: lines are the start/stop notices; anything else is an error report.
-    $bad = @($vrLines | Where-Object { $_ -ne 'VR: started (mock)' -and $_ -ne 'VR: stopped' })
+    if ($requireRecenter -and -not ($vrLines -ccontains 'VR: recentered')) { return "log has no 'VR: recentered' line (auto-recenter did not run)" }
+    # Expected VR: lines are the start/stop/recenter notices; anything else is an error report.
+    $bad = @($vrLines | Where-Object { $_ -cne 'VR: started (mock)' -and $_ -cne 'VR: stopped' -and $_ -cne 'VR: recentered' })
     if ($bad.Count) { return "log has VR error line(s): $($bad -join ' | ')" }
     return $null
 }
@@ -99,7 +101,7 @@ foreach ($s in $Scenarios) {
             if ($LASTEXITCODE -ne 0) { $why = "run-smoke failed ($LASTEXITCODE)" }
         }
         catch { $why = "run-smoke error: $_" }
-        if (-not $why) { $why = Test-VrLog $log }
+        if (-not $why) { $why = Test-VrLog $log ([bool]$sc.Recenter) }
         if (-not $why) {
             $shotArgs = @('-I', $checkShot, $shot)
             if ($sc.Stereo) { $shotArgs += '--stereo' }
