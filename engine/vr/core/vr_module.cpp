@@ -194,7 +194,6 @@ void VR_BeginPanel(int, int) {}
 void VR_EndPanel(void) {}
 void VR_DrawPanelQuad(const float[4][3]) {}
 
-float VR_BodyYawFromSetAngle(float, float) { return 0.0f; }
 void VR_PanelCorners(const float[3], float, float, float, float, float out[4][3]) {
 	for (int i = 0; i < 4; ++i) zero3(out[i]);
 }

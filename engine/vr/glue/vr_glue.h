@@ -42,4 +42,9 @@ qboolean VRG_EyeActive (void);	/* true while an eye's R_RenderView runs */
 void VRG_SetupEyeGL (void);	/* R_SetupGL in an eye pass: eye viewport + eye projection */
 void VRG_EyeFrustum (float normals[4][3]);	/* R_SetFrustum in an eye pass: left, right, bottom, top */
 
+/* View angles (CL_SendCmd / cl_parse): all no-ops while VR is not running. */
+void VRG_PreInput (void);	/* before CL_BaseMove: cl.viewangles = {0, body_yaw, 0} */
+void VRG_PostInput (void);	/* after IN_Move: body_yaw = cl.viewangles[YAW]; cl.viewangles = body + head */
+void VRG_OnSetAngle (void);	/* after svc_setangle(_interpolate): body_yaw = server yaw - head yaw */
+
 #endif /* HXVR_VR_GLUE_H */

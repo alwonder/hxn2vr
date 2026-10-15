@@ -23,6 +23,7 @@
 .EXAMPLE
   powershell -File tests/smoke/vr-mock-smoke.ps1 -Exe build/win64/Debug/hxn2vr.exe
   powershell -File tests/smoke/vr-mock-smoke.ps1 -Exe build/win64/Debug/hxn2vr.exe -Scenarios a
+  powershell -File tests/smoke/vr-mock-smoke.ps1 -Scenarios a,b -ExtraArgs "+vr_mock_motion 1"
 #>
 [CmdletBinding()]
 param(
@@ -30,7 +31,8 @@ param(
     [string[]]$Scenarios = @('a', 'b', 'c'),
     [string]$GameDir = 'build/game',
     [switch]$IncludePending,
-    [int]$TimeoutSec = 180
+    [int]$TimeoutSec = 180,
+    [string[]]$ExtraArgs = @()   # appended to the VR engine arguments, e.g. +vr_mock_motion 1
 )
 
 $ErrorActionPreference = 'Stop'
@@ -52,7 +54,7 @@ $log = Join-Path $GameDir 'debug_h2.log'
 $config = Join-Path $GameDir 'data1\config.cfg'
 
 # Placed before +exec by run-smoke, so they run before the scripted commands.
-$vrArgs = @('-condebug', '+vr_backend', 'mock', '+vr_mirror', '2', '+vr_enabled', '1')
+$vrArgs = @('-condebug', '+vr_backend', 'mock', '+vr_mirror', '2', '+vr_enabled', '1') + @($ExtraArgs | ForEach-Object { $_ -split ' ' } | Where-Object { $_ })
 
 $all = [ordered]@{
     a = @{ Commands = @('map demo1'); Stereo = $true; Pending = $false }

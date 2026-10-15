@@ -21,6 +21,8 @@ cvar_t	vr_mock_motion = {"vr_mock_motion", "0", CVAR_NONE};
 cvar_t	vr_mock_hz = {"vr_mock_hz", "90", CVAR_NONE};
 cvar_t	vr_debug_ticks = {"vr_debug_ticks", "0", CVAR_NONE};
 
+static void VRG_Recenter_f (void);
+
 void VRG_Init (void)
 {
 	Cvar_RegisterVariable (&vr_enabled);
@@ -35,6 +37,7 @@ void VRG_Init (void)
 	Cvar_RegisterVariable (&vr_mock_motion);
 	Cvar_RegisterVariable (&vr_mock_hz);
 	Cvar_RegisterVariable (&vr_debug_ticks);
+	Cmd_AddCommand ("vr_recenter", VRG_Recenter_f);
 }
 
 /* ---- VR session state ---- */
@@ -43,6 +46,12 @@ static vr_simclock_t	vrg_simclock;
 static vr_frame_t	vrg_frame;		/* flags of the last VR_BeginFrame */
 static qboolean		vrg_active;		/* running && last frame had render != 0 */
 static qboolean		vrg_frame_pending;	/* VR_BeginFrame done, VR_EndFrame not yet */
+
+/* body yaw (degrees, (-180, 180]) and the recenter anchor (tracking space, x/z used): the view yaw
+ * is body_yaw + head yaw. Keyboard/mouse turn the body; the head adds its own rotation. */
+static float		vrg_body_yaw;
+static qboolean		vrg_body_valid;		/* body_yaw taken from cl.viewangles since VR started */
+static vr_vec3_t	vrg_anchor;
 
 /* current eye pass (VRG_UpdateScreen) */
 static qboolean		vrg_eye_active;
@@ -163,6 +172,9 @@ static void VRG_Start (void)
 
 	memset (&vrg_simclock, 0, sizeof(vrg_simclock));
 	memset (&vrg_frame, 0, sizeof(vrg_frame));
+	vrg_body_yaw = 0;
+	vrg_body_valid = false;
+	memset (&vrg_anchor, 0, sizeof(vrg_anchor));
 	vrg_dbg_frames = vrg_dbg_ticks = 0;
 	vrg_dbg_start = Sys_DoubleTime ();
 	vrg_frame_pending = false;
@@ -239,6 +251,88 @@ int VRG_ServerTicks (double dt)
 	return n;
 }
 
+/* ---- body yaw / head-composed view angles ---- */
+
+/* yaw of the head pose in Quake angles; angles[] = pitch, yaw, roll */
+static void VRG_HeadAngles (float angles[3])
+{
+	vr_pose_t	pose;
+
+	VR_GetHeadPose (&pose);
+	VR_TrackingToQuakeAngles (&pose.rot, angles);
+}
+
+/* Before CL_BaseMove: the keyboard/mouse turn the body, so the move code starts from
+ * {0, body_yaw, 0}. */
+void VRG_PreInput (void)
+{
+	float	head[3];
+
+	if (!VR_IsRunning())
+		return;
+	if (cls.demoplayback)
+	{
+		/* the demo sets the view: it is the body, the head adds on top; cl.viewangles untouched */
+		vrg_body_yaw = cl.viewangles[YAW];
+		vrg_body_valid = true;
+		return;
+	}
+	if (!vrg_body_valid)
+	{
+		/* VR started mid-game: the current view direction becomes the head's direction */
+		VRG_HeadAngles (head);
+		vrg_body_yaw = VR_BodyYawFromSetAngle (cl.viewangles[YAW], head[YAW]);
+		vrg_body_valid = true;
+	}
+	cl.viewangles[PITCH] = 0;
+	cl.viewangles[YAW] = vrg_body_yaw;
+	cl.viewangles[ROLL] = 0;
+}
+
+/* After IN_Move: take the turned body yaw and compose it with the head's angles; this is
+ * what CL_SendMove sends (movement and shooting follow the head in phase 1). */
+void VRG_PostInput (void)
+{
+	float	head[3], view[3];
+
+	if (!VR_IsRunning() || cls.demoplayback)
+		return;
+	vrg_body_yaw = cl.viewangles[YAW];
+	VRG_HeadAngles (head);
+	VR_ComposeViewAngles (vrg_body_yaw, head, view);
+	VectorCopy (view, cl.viewangles);
+}
+
+/* After the server wrote cl.viewangles (svc_setangle / svc_setangle_interpolate): choose the
+ * body yaw so that body + head yaw gives the server's yaw. */
+void VRG_OnSetAngle (void)
+{
+	float	head[3];
+
+	if (!VR_IsRunning())
+		return;
+	VRG_HeadAngles (head);
+	vrg_body_yaw = VR_BodyYawFromSetAngle (cl.viewangles[YAW], head[YAW]);
+	vrg_body_valid = true;
+}
+
+/* vr_recenter: the head's current position (x, z) becomes the player's origin */
+static void VRG_Recenter_f (void)
+{
+	vr_pose_t	pose;
+
+	if (!VR_IsRunning())
+	{
+		Con_Printf ("VR: not running\n");
+		return;
+	}
+	VR_GetHeadPose (&pose);
+	vrg_anchor.x = pose.pos.x;
+	vrg_anchor.y = 0;
+	vrg_anchor.z = pose.pos.z;
+	Con_Printf ("VR: recentered\n");
+}
+
 /* ---- per-eye rendering ---- */
 
 qboolean VRG_EyeActive (void)
@@ -282,7 +376,7 @@ qboolean VRG_UpdateScreen (void)
 	vec3_t		feet, save_org, save_ang, head_ang, org;
 	float		body_yaw = 0, upm = 0;
 	vr_pose_t	pose;
-	vr_vec3_t	anchor = {0, 0, 0};	/* vr_recenter: Task 1.7 */
+	vr_vec3_t	anchor = vrg_anchor;
 
 	if (!vrg_frame_pending)
 		return false;	/* VR off, or this host frame's VR frame was already submitted */
@@ -301,7 +395,7 @@ qboolean VRG_UpdateScreen (void)
 		VectorCopy (r_refdef.vieworg, feet);
 		feet[2] -= cl.viewheight;
 		numvis = cl_numvisedicts;	/* R_DrawWorld appends static entities on every pass */
-		body_yaw = cl.viewangles[YAW];	/* the glue's body_yaw from Task 1.7 on */
+		body_yaw = vrg_body_yaw;
 		upm = VR_UnitsPerMetre (vr_eye_height.value, vr_world_scale.value);
 	}
 

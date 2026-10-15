@@ -944,6 +944,8 @@ static void V_CalcRefdef (void)
 	V_CalcViewRoll ();
 	V_AddIdle ();
 	}	/* HXVR */
+	else if (v_dmg_time > 0)	/* HXVR: the damage-roll timer keeps decaying in VR (roll not applied) */
+		v_dmg_time -= host_frametime;
 
 	// offsets
 	angles[PITCH] = -ent->angles[PITCH];	// because entity pitches are

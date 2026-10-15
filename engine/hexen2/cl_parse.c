@@ -24,6 +24,7 @@
 #include "bgmusic.h"
 #include "cdaudio.h"
 #include "r_shared.h"
+#include "vr_glue.h"	/* HXVR */
 
 static const char *svc_strings[] =
 {
@@ -1252,6 +1253,7 @@ void CL_ParseServerMessage (void)
 		case svc_setangle:
 			for (i = 0; i < 3; i++)
 				cl.viewangles[i] = MSG_ReadAngle ();
+			VRG_OnSetAngle ();	/* HXVR */
 			break;
 
 		case svc_setangle_interpolate:
@@ -1291,6 +1293,7 @@ void CL_ParseServerMessage (void)
 				else if (cl.viewangles[i] < -180)
 					cl.viewangles[i] += 360;
 			}
+			VRG_OnSetAngle ();	/* HXVR */
 			break;
 
 		case svc_setview:

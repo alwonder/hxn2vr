@@ -150,6 +150,11 @@ void VR_ComposeViewAngles(float body_yaw, const float head_angles[3], float out[
 	out[2] = roll;
 }
 
+// Body yaw such that compose(body, head) yields the server's yaw: body = new_yaw - head_yaw.
+float VR_BodyYawFromSetAngle(float new_yaw, float head_yaw) {
+	return normalize180(new_yaw - head_yaw);
+}
+
 // Fixed 72 Hz server clock. Accumulates the render dt and returns how many 1/72 s ticks are due,
 // at most kMaxSimTicks; whatever is left over beyond that is discarded (no catch-up burst).
 // While paused nothing is accumulated and no ticks are due.
