@@ -213,6 +213,16 @@ hxvr::gl::GLenum HXVR_GLAPI fakeStatus(hxvr::gl::GLenum) {
 	return g_fbo.attached == g_fbo.incomplete ? 0x8CD6u : hxvr::gl::kFramebufferComplete;
 }
 void HXVR_GLAPI fakeGetInt(hxvr::gl::GLenum, hxvr::gl::GLint *v) { *v = 0; }
+bool g_srgb = false;   // GL_FRAMEBUFFER_SRGB state of the fake
+int g_blits = 0;
+hxvr::gl::GLboolean HXVR_GLAPI fakeIsEnabled(hxvr::gl::GLenum cap) { return cap == 0x8DB9 && g_srgb ? 1 : 0; }
+void HXVR_GLAPI fakeDisable(hxvr::gl::GLenum cap) { if (cap == 0x8DB9) g_srgb = false; }
+void HXVR_GLAPI fakeEnable(hxvr::gl::GLenum cap) { if (cap == 0x8DB9) g_srgb = true; }
+void HXVR_GLAPI fakeBlit(hxvr::gl::GLint, hxvr::gl::GLint, hxvr::gl::GLint, hxvr::gl::GLint, hxvr::gl::GLint, hxvr::gl::GLint,
+                         hxvr::gl::GLint, hxvr::gl::GLint, hxvr::gl::GLbitfield, hxvr::gl::GLenum) {
+	CHECK_FALSE(g_srgb);   // raw (gamma-encoded) values copied: no sRGB decode/encode
+	++g_blits;
+}
 
 hxvr::GlExt fakeFboGl() {
 	hxvr::GlExt gl;
@@ -227,6 +237,10 @@ hxvr::GlExt fakeFboGl() {
 	gl.glFramebufferTexture2D = fakeFbTex;
 	gl.glCheckFramebufferStatus = fakeStatus;
 	gl.glGetIntegerv = fakeGetInt;
+	gl.glIsEnabled = fakeIsEnabled;
+	gl.glDisable = fakeDisable;
+	gl.glEnable = fakeEnable;
+	gl.glBlitFramebuffer = fakeBlit;
 	return gl;
 }
 
@@ -258,5 +272,23 @@ TEST_CASE("eye targets: rotating swapchain images are re-attached, completeness 
 	REQUIRE(t.ensure(glm::ivec2(32, 32)));
 	CHECK(t.bind(7, 0));
 	CHECK(g_fbo.statusChecks == 7);
+	t.destroy();
+}
+
+TEST_CASE("eye targets: GL_FRAMEBUFFER_SRGB is kept disabled for eye rendering and the mirror blit") {
+	g_fbo = FakeFbo{};
+	g_blits = 0;
+	const hxvr::GlExt gl = fakeFboGl();
+	hxvr::EyeTargets t(&gl);
+	REQUIRE(t.ensure(glm::ivec2(64, 64)));
+	g_srgb = true;
+	REQUIRE(t.bind(7, 0));
+	CHECK_FALSE(g_srgb);   // gamma-encoded output is written to the sRGB swapchain image as-is
+	t.unbind();
+	g_srgb = true;
+	t.blitToWindow(0, 1, 1280, 720);
+	CHECK(g_blits == 1);
+	CHECK_FALSE(g_srgb);
+	g_srgb = false;
 	t.destroy();
 }

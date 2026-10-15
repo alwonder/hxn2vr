@@ -44,6 +44,7 @@ constexpr GLenum kDepthStencilAttachment = 0x821A;
 constexpr GLenum kDepth24Stencil8 = 0x88F0;
 constexpr GLenum kFramebufferComplete = 0x8CD5;
 constexpr GLenum kScissorTest = 0x0C11;
+constexpr GLenum kFramebufferSrgb = 0x8DB9;
 constexpr GLbitfield kColorBufferBit = 0x00004000;
 constexpr GLbitfield kDepthBufferBit = 0x00000100;
 constexpr GLbitfield kStencilBufferBit = 0x00000400;

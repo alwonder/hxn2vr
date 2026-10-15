@@ -10,10 +10,11 @@
 
 namespace hxvr {
 
-// Swapchain colour format. GL_RGBA8 (0x8058) > GL_SRGB8_ALPHA8 (0x8C43) > the first offered
-// colour format. Depth/stencil formats are never chosen. format 0 = no colour format offered.
+// Swapchain colour format (ruling R20). GL_SRGB8_ALPHA8 (0x8C43) > GL_RGBA8 (0x8058) > the first
+// offered colour format. Depth/stencil formats are never chosen. format 0 = no colour format offered.
 // gammaPassthrough: the engine's gamma-encoded output is stored as-is in an sRGB image (the
-// compositor decodes it), so GL_FRAMEBUFFER_SRGB must stay disabled.
+// compositor decodes it), so GL_FRAMEBUFFER_SRGB must stay disabled (EyeTargets ensures it). Without
+// it (UNORM image) the runtime treats the values as linear and the picture may look washed out.
 struct FormatChoice { int64_t format; bool gammaPassthrough; };
 FormatChoice chooseSwapchainFormat(const std::vector<int64_t>& offered);
 
@@ -39,6 +40,15 @@ int scaledEyeDim(uint32_t recommended, float scale, uint32_t maxDim);
 // A located pose is usable only with both ORIENTATION_VALID and POSITION_VALID set
 // (tracked or not). Works for XrSpaceLocationFlags and XrViewStateFlags (same bit values).
 bool poseFlagsValid(uint64_t flags);
+
+// What to do after xrWaitSwapchainImage returned `r` on attempt `attempt` (1-based) of
+// `maxAttempts`. Ready: the image was waited (any success code other than XR_TIMEOUT_EXPIRED).
+// Retry: XR_TIMEOUT_EXPIRED with attempts left. Lost: still timing out after the last attempt --
+// the image is acquired but not waited, so it must NOT be released (CALL_ORDER_INVALID); the
+// swapchain is out of step and the session must be restarted. Release: a genuine failure; give
+// the acquired image back.
+enum class SwapchainWait { Ready, Retry, Release, Lost };
+SwapchainWait swapchainWaitAction(XrResult r, int attempt, int maxAttempts);
 
 // OPAQUE if offered, else the first offered mode; XR_ENVIRONMENT_BLEND_MODE_MAX_ENUM if none.
 XrEnvironmentBlendMode chooseBlendMode(const std::vector<XrEnvironmentBlendMode>& offered);

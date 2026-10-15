@@ -62,6 +62,7 @@ bool EyeTargets::ensure(glm::ivec2 size) {
 bool EyeTargets::bind(unsigned colorTex, int eye) {
 	if (!gl_ || eye < 0 || eye > 1 || !fbo_[eye] || !colorTex) return false;
 	gl_->glBindFramebuffer(gl::kFramebuffer, fbo_[eye]);
+	ensureNoSrgbConversion();
 	if (attached_[eye] != colorTex) {
 		// Swapchain images rotate: attach this frame's texture (cheap). The completeness check runs
 		// once per image name; incomplete names are not remembered, so they are re-checked.
@@ -82,6 +83,13 @@ bool EyeTargets::bind(unsigned colorTex, int eye) {
 	return true;
 }
 
+// Ruling R20: the engine's colour is gamma-encoded and goes into the (sRGB) swapchain image as-is,
+// and the mirror blit copies those raw values to the window. GL_FRAMEBUFFER_SRGB would encode on
+// write (and decode on blit reads), so it is kept off. The engine never enables it; left disabled.
+void EyeTargets::ensureNoSrgbConversion() {
+	if (gl_->glIsEnabled(gl::kFramebufferSrgb)) gl_->glDisable(gl::kFramebufferSrgb);
+}
+
 void EyeTargets::unbind() {
 	if (gl_) gl_->glBindFramebuffer(gl::kFramebuffer, 0);
 }
@@ -90,6 +98,7 @@ void EyeTargets::blitToWindow(int eye, int mirrorMode, int winW, int winH) {
 	if (!gl_ || eye < 0 || eye > 1 || !fbo_[eye] || !complete_[eye]) return;
 	BlitRect r;
 	if (!mirrorBlitRect(eye, mirrorMode, size_, winW, winH, r)) return;
+	ensureNoSrgbConversion();
 	const bool scissor = gl_->glIsEnabled(gl::kScissorTest) != 0;
 	if (scissor) gl_->glDisable(gl::kScissorTest);
 	gl_->glBindFramebuffer(gl::kReadFramebuffer, fbo_[eye]);

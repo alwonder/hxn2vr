@@ -40,6 +40,8 @@ public:
 	void destroy();
 
 private:
+	void ensureNoSrgbConversion();
+
 	const GlExt *gl_;
 	glm::ivec2 size_{0, 0};
 	unsigned fbo_[2] = {0, 0};

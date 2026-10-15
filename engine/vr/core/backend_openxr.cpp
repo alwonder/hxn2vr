@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -35,6 +36,7 @@ namespace {
 
 constexpr int kMaxGlErrorClears = 16;                     // bounded glGetError drain (SteamVR)
 constexpr XrDuration kSwapchainWaitNs = 1000000000;       // 1 s for xrWaitSwapchainImage
+constexpr int kSwapchainWaitAttempts = 3;                  // XR_TIMEOUT_EXPIRED retries before giving up
 constexpr auto kIdleSleep = std::chrono::milliseconds(10);
 constexpr auto kExitWait = std::chrono::milliseconds(1500);   // bounded wait for STOPPING on stop()
 constexpr std::size_t kMaxDebugMessages = 32;
@@ -104,6 +106,10 @@ public:
 		}
 		if (!gl_) {
 			err = "OpenXR: no OpenGL entry points";
+			return false;
+		}
+		if (!std::isfinite(p.eyeHeightM) || !(p.eyeHeightM > 0.0f)) {
+			err = "OpenXR: eye height must be a positive number of metres (vr_eye_height)";
 			return false;
 		}
 		dc_ = wglGetCurrentDC();
@@ -202,9 +208,18 @@ public:
 		}
 		XrSwapchainImageWaitInfo wi{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
 		wi.timeout = kSwapchainWaitNs;
-		r = call("xrWaitSwapchainImage", [&] { return xrWaitSwapchainImage(e.sc, &wi); });
-		if (r != XR_SUCCESS || idx >= e.images.size()) {   // failed / XR_TIMEOUT_EXPIRED: give the image back
-			if (r == XR_TIMEOUT_EXPIRED) say("xrWaitSwapchainImage timed out");
+		SwapchainWait action = SwapchainWait::Retry;
+		for (int attempt = 1; action == SwapchainWait::Retry; ++attempt) {
+			r = call("xrWaitSwapchainImage", [&] { return xrWaitSwapchainImage(e.sc, &wi); });
+			action = swapchainWaitAction(r, attempt, kSwapchainWaitAttempts);
+		}
+		if (action == SwapchainWait::Lost) {
+			// Acquired but never waited: releasing it is not allowed, so the swapchain is out of step.
+			restoreBindings(saved);
+			markLost("xrWaitSwapchainImage timed out repeatedly; VR must be restarted");
+			return 0;
+		}
+		if (action == SwapchainWait::Release || idx >= e.images.size()) {   // give the image back
 			XrSwapchainImageReleaseInfo ri{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
 			call("xrReleaseSwapchainImage", [&] { return xrReleaseSwapchainImage(e.sc, &ri); });
 			restoreBindings(saved);
@@ -613,6 +628,8 @@ private:
 		    ", " + std::to_string(size_.x) + "x" + std::to_string(size_.y) + " per eye (recommended " +
 		    std::to_string(recW) + "x" + std::to_string(recH) + "), " + std::to_string(eyes_[0].images.size()) +
 		    " images");
+		if (!fc.gammaPassthrough)
+			say("warning: the runtime offers no sRGB swapchain format; the headset image may look washed out");
 		return true;
 	}
 
@@ -636,6 +653,16 @@ private:
 			case XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING:
 				markLost("OpenXR runtime is shutting down (instance loss pending)");
 				break;
+			case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING: {
+				const auto* e = reinterpret_cast<const XrEventDataReferenceSpaceChangePending*>(&ev);
+				if (e->session == sess_)
+					say(std::string("OpenXR reference space change pending (") +
+					    (e->referenceSpaceType == XR_REFERENCE_SPACE_TYPE_STAGE   ? "STAGE"
+					     : e->referenceSpaceType == XR_REFERENCE_SPACE_TYPE_LOCAL ? "LOCAL"
+					                                                              : "other") +
+					    "): the tracking origin moved");
+				break;
+			}
 			case XR_TYPE_EVENT_DATA_EVENTS_LOST:
 				say("OpenXR events lost");
 				break;
@@ -710,8 +737,9 @@ private:
 			while (running_ && !lost_ && std::chrono::steady_clock::now() < deadline) {
 				pollEvents();   // STOPPING -> xrEndSession, running_ = false
 				if (!running_ || lost_) break;
-				if (state_ == XR_SESSION_STATE_SYNCHRONIZED || state_ == XR_SESSION_STATE_VISIBLE ||
-				    state_ == XR_SESSION_STATE_FOCUSED) {
+				// running_: READY (begun, not yet synchronized) also needs frames to progress
+				if (state_ == XR_SESSION_STATE_READY || state_ == XR_SESSION_STATE_SYNCHRONIZED ||
+				    state_ == XR_SESSION_STATE_VISIBLE || state_ == XR_SESSION_STATE_FOCUSED) {
 					if (!emptyFrame()) break;
 				} else {
 					std::this_thread::sleep_for(std::chrono::milliseconds(5));

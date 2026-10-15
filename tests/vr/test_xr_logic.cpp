@@ -8,14 +8,18 @@ using hxvr::chooseSwapchainFormat;
 using hxvr::FormatChoice;
 using hxvr::SessionStep;
 
-TEST_CASE("swapchain format: RGBA8 > SRGB8_ALPHA8 (passthrough) > first colour format") {
+TEST_CASE("swapchain format: SRGB8_ALPHA8 (passthrough) > RGBA8 > first colour format (ruling R20)") {
 	FormatChoice c = chooseSwapchainFormat({0x8C43, 0x8058});
-	CHECK(c.format == 0x8058);
-	CHECK_FALSE(c.gammaPassthrough);
-
-	c = chooseSwapchainFormat({0x8C43});
 	CHECK(c.format == 0x8C43);
 	CHECK(c.gammaPassthrough);
+
+	c = chooseSwapchainFormat({0x8058, 0x8C43});   // order of the offer does not matter
+	CHECK(c.format == 0x8C43);
+	CHECK(c.gammaPassthrough);
+
+	c = chooseSwapchainFormat({0x8058});
+	CHECK(c.format == 0x8058);
+	CHECK_FALSE(c.gammaPassthrough);
 
 	c = chooseSwapchainFormat({0x881A});
 	CHECK(c.format == 0x881A);
@@ -23,7 +27,8 @@ TEST_CASE("swapchain format: RGBA8 > SRGB8_ALPHA8 (passthrough) > first colour f
 
 	// the list the VDXR runtime offered in the Phase-0 spike
 	c = chooseSwapchainFormat({0x881A, 0x8C43, 0x8058, 0x8CAC, 0x8CAD, 0x88F0, 0x81A5});
-	CHECK(c.format == 0x8058);
+	CHECK(c.format == 0x8C43);
+	CHECK(c.gammaPassthrough);
 }
 
 TEST_CASE("swapchain format: depth formats are never a colour fallback") {
@@ -124,4 +129,20 @@ TEST_CASE("GL_VERSION string parsing") {
 	CHECK_FALSE(hxvr::parseGlVersion("OpenGL ES 3.2", major, minor));
 	CHECK_FALSE(hxvr::parseGlVersion("", major, minor));
 	CHECK_FALSE(hxvr::parseGlVersion(nullptr, major, minor));
+}
+
+TEST_CASE("swapchain image wait: retry timeouts, release only after a genuine failure") {
+	using hxvr::SwapchainWait;
+	using hxvr::swapchainWaitAction;
+	CHECK(swapchainWaitAction(XR_SUCCESS, 1, 3) == SwapchainWait::Ready);
+	CHECK(swapchainWaitAction(XR_SUCCESS, 3, 3) == SwapchainWait::Ready);
+	// XR_TIMEOUT_EXPIRED is a success code: the image was not waited, so it must not be released
+	CHECK(swapchainWaitAction(XR_TIMEOUT_EXPIRED, 1, 3) == SwapchainWait::Retry);
+	CHECK(swapchainWaitAction(XR_TIMEOUT_EXPIRED, 2, 3) == SwapchainWait::Retry);
+	CHECK(swapchainWaitAction(XR_TIMEOUT_EXPIRED, 3, 3) == SwapchainWait::Lost);
+	// a genuine failure: give the acquired image back (attempted release)
+	CHECK(swapchainWaitAction(XR_ERROR_RUNTIME_FAILURE, 1, 3) == SwapchainWait::Release);
+	CHECK(swapchainWaitAction(XR_ERROR_SESSION_LOST, 2, 3) == SwapchainWait::Release);
+	// other success codes (e.g. XR_SESSION_LOSS_PENDING) mean the image was waited
+	CHECK(swapchainWaitAction(XR_SESSION_LOSS_PENDING, 1, 3) == SwapchainWait::Ready);
 }

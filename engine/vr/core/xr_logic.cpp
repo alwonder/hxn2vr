@@ -32,8 +32,10 @@ bool isDepthFormat(int64_t f) {
 
 FormatChoice chooseSwapchainFormat(const std::vector<int64_t>& offered) {
 	const auto has = [&](int64_t f) { return std::find(offered.begin(), offered.end(), f) != offered.end(); };
-	if (has(kGlRgba8)) return FormatChoice{kGlRgba8, false};
+	// Ruling R20: the engine writes gamma-encoded colour. An sRGB image stores it as-is and the
+	// compositor decodes it; a UNORM image would be taken as linear (washed-out picture).
 	if (has(kGlSrgb8Alpha8)) return FormatChoice{kGlSrgb8Alpha8, true};
+	if (has(kGlRgba8)) return FormatChoice{kGlRgba8, false};
 	for (int64_t f : offered)
 		if (!isDepthFormat(f)) return FormatChoice{f, false};
 	return FormatChoice{0, false};
@@ -83,6 +85,12 @@ bool poseFlagsValid(uint64_t flags) {
 	static_assert(XR_SPACE_LOCATION_ORIENTATION_VALID_BIT == XR_VIEW_STATE_ORIENTATION_VALID_BIT &&
 	              XR_SPACE_LOCATION_POSITION_VALID_BIT == XR_VIEW_STATE_POSITION_VALID_BIT);
 	return (flags & need) == need;
+}
+
+SwapchainWait swapchainWaitAction(XrResult r, int attempt, int maxAttempts) {
+	if (XR_FAILED(r)) return SwapchainWait::Release;
+	if (r == XR_TIMEOUT_EXPIRED) return attempt < maxAttempts ? SwapchainWait::Retry : SwapchainWait::Lost;
+	return SwapchainWait::Ready;
 }
 
 XrEnvironmentBlendMode chooseBlendMode(const std::vector<XrEnvironmentBlendMode>& offered) {
