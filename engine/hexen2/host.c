@@ -27,6 +27,7 @@
 #include "debuglog.h"
 #include "bgmusic.h"
 #include "cdaudio.h"
+#include "vr_glue.h"	/* HXVR */
 #include <setjmp.h>
 
 /*
@@ -1050,6 +1051,8 @@ void Host_Init (void)
 		IN_Init();
 	}
 
+	VRG_Init ();	/* HXVR: register vr_ cvars before config.cfg/hexen.rc are executed */
+
 	CFG_CloseConfig();
 
 #ifdef GLQUAKE
@@ -1110,6 +1113,8 @@ void Host_Shutdown(void)
 	Host_WriteConfiguration ("config.cfg");
 
 	NET_Shutdown ();
+
+	VRG_Shutdown ();	/* HXVR: stop VR before the GL context goes away */
 
 	if (cls.state != ca_dedicated)
 	{

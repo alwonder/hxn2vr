@@ -7,3 +7,4 @@ endif()
 enable_language(RC)
 
 include(cmake/glhexen2.cmake)
+include(engine/vr/vr.cmake)

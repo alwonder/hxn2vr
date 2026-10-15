@@ -90,6 +90,9 @@ set(HXN2VR_SOURCES
     engine/hexen2/world.c
     engine/h2shared/zone.c
 
+    # HXVR: engine-side glue for the VR module (C)
+    engine/vr/glue/vr_glue.c
+
     engine/h2shared/win32res.rc
 )
 
@@ -109,6 +112,7 @@ target_include_directories(hxn2vr PRIVATE
     ${CMAKE_SOURCE_DIR}/oslibs/windows/misc/include
     ${CMAKE_SOURCE_DIR}/oslibs/windows/dxsdk/include
     ${CMAKE_SOURCE_DIR}/oslibs/windows/codecs/include
+    ${CMAKE_SOURCE_DIR}/engine/vr/glue    # HXVR
 )
 
 target_compile_definitions(hxn2vr PRIVATE
@@ -135,6 +139,7 @@ target_link_directories(hxn2vr PRIVATE ${HXN2VR_CODEC_DIR})
 target_link_libraries(hxn2vr PRIVATE
     libvorbisfile libvorbis libopusfile libopus libFLAC libogg libmad libmikmod
     ws2_32 winmm
+    hxvr    # HXVR: C++20 VR module (engine/vr/vr.cmake); provides vr_api.h include dir
 )
 
 add_custom_command(TARGET hxn2vr POST_BUILD
