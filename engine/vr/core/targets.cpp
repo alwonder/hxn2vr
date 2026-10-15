@@ -104,4 +104,99 @@ void EyeTargets::destroy() {
 	size_ = glm::ivec2(0, 0);
 }
 
+
+bool PanelTarget::ensure(glm::ivec2 size) {
+	if (!gl_ || size.x <= 0 || size.y <= 0) return false;
+	if (fbo_ && size == size_) return complete_;
+	destroy();
+
+	gl::GLint prevTex = 0, prevFbo = 0;
+	gl_->glGetIntegerv(gl::kTextureBinding2D, &prevTex);   // the engine caches its bound texture
+	gl_->glGetIntegerv(gl::kFramebufferBinding, &prevFbo);
+	gl_->glGenTextures(1, &tex_);
+	gl_->glBindTexture(gl::kTexture2D, tex_);
+	gl_->glTexParameteri(gl::kTexture2D, gl::kTextureMinFilter, static_cast<gl::GLint>(gl::kLinear));
+	gl_->glTexParameteri(gl::kTexture2D, gl::kTextureMagFilter, static_cast<gl::GLint>(gl::kLinear));
+	gl_->glTexParameteri(gl::kTexture2D, gl::kTextureWrapS, static_cast<gl::GLint>(gl::kClampToEdge));
+	gl_->glTexParameteri(gl::kTexture2D, gl::kTextureWrapT, static_cast<gl::GLint>(gl::kClampToEdge));
+	gl_->glTexImage2D(gl::kTexture2D, 0, static_cast<gl::GLint>(gl::kRgba8), size.x, size.y, 0,
+	                  gl::kRgba, gl::kUnsignedByte, nullptr);
+	gl_->glBindTexture(gl::kTexture2D, static_cast<gl::GLuint>(prevTex));
+
+	gl_->glGenFramebuffers(1, &fbo_);
+	gl_->glBindFramebuffer(gl::kFramebuffer, fbo_);
+	gl_->glFramebufferTexture2D(gl::kFramebuffer, gl::kColorAttachment0, gl::kTexture2D, tex_, 0);
+	complete_ = gl_->glCheckFramebufferStatus(gl::kFramebuffer) == gl::kFramebufferComplete;
+	gl_->glBindFramebuffer(gl::kFramebuffer, static_cast<gl::GLuint>(prevFbo));
+	size_ = size;
+	return complete_;
+}
+
+bool PanelTarget::begin(glm::ivec2 size) {
+	if (!gl_ || active_ || !ensure(size)) return false;
+	gl_->glGetIntegerv(gl::kFramebufferBinding, &prevFbo_);
+	gl_->glGetIntegerv(gl::kViewport, prevViewport_);
+	gl_->glBindFramebuffer(gl::kFramebuffer, fbo_);
+	gl_->glViewport(0, 0, size_.x, size_.y);
+
+	// Transparent black; the engine's clear colour and scissor state are left as they were.
+	gl::GLfloat saved[4] = {0, 0, 0, 0};
+	gl_->glGetFloatv(gl::kColorClearValue, saved);
+	const bool scissor = gl_->glIsEnabled(gl::kScissorTest) != 0;
+	if (scissor) gl_->glDisable(gl::kScissorTest);
+	gl_->glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	gl_->glClear(gl::kColorBufferBit);
+	gl_->glClearColor(saved[0], saved[1], saved[2], saved[3]);
+	if (scissor) gl_->glEnable(gl::kScissorTest);
+	active_ = true;
+	return true;
+}
+
+void PanelTarget::end() {
+	if (!gl_ || !active_) return;
+	active_ = false;
+	gl_->glBindFramebuffer(gl::kFramebuffer, static_cast<gl::GLuint>(prevFbo_));
+	gl_->glViewport(prevViewport_[0], prevViewport_[1], prevViewport_[2], prevViewport_[3]);
+}
+
+void PanelTarget::drawQuad(const float corners[4][3]) {
+	if (!gl_ || active_ || !tex_ || !complete_) return;
+	// Everything touched below sits in these attribute groups (enables, blend, depth mask,
+	// texture binding and environment, current colour); the engine's state is restored by the pop.
+	gl_->glPushAttrib(gl::kEnableBit | gl::kColorBufferBit | gl::kDepthBufferBit | gl::kTextureBit |
+	                  gl::kCurrentBit | gl::kPolygonBit);
+	gl_->glDisable(gl::kDepthTest);
+	gl_->glDisable(gl::kCullFace);
+	gl_->glDisable(gl::kAlphaTest);
+	gl_->glDisable(gl::kLighting);
+	gl_->glDisable(gl::kFog);
+	gl_->glDisable(gl::kStencilTest);
+	gl_->glDisable(gl::kScissorTest);
+	gl_->glDepthMask(0);
+	gl_->glEnable(gl::kBlend);
+	gl_->glBlendFunc(gl::kSrcAlpha, gl::kOneMinusSrcAlpha);
+	gl_->glEnable(gl::kTexture2D);
+	gl_->glBindTexture(gl::kTexture2D, tex_);
+	gl_->glTexEnvf(gl::kTextureEnv, gl::kTextureEnvMode, static_cast<gl::GLfloat>(gl::kModulate));
+	gl_->glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+	// Texture row 0 is the bottom of the image: the panel's top edge is t = 1.
+	static const float uv[4][2] = {{0.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f}, {0.0f, 0.0f}};
+	gl_->glBegin(gl::kQuads);
+	for (int i = 0; i < 4; ++i) {
+		gl_->glTexCoord2f(uv[i][0], uv[i][1]);
+		gl_->glVertex3f(corners[i][0], corners[i][1], corners[i][2]);
+	}
+	gl_->glEnd();
+	gl_->glPopAttrib();
+}
+
+void PanelTarget::destroy() {
+	if (gl_ && active_) end();
+	if (gl_ && fbo_) gl_->glDeleteFramebuffers(1, &fbo_);
+	if (gl_ && tex_) gl_->glDeleteTextures(1, &tex_);
+	fbo_ = tex_ = 0;
+	complete_ = false;
+	size_ = glm::ivec2(0, 0);
+}
+
 }  // namespace hxvr

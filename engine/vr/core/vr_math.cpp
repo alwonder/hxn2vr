@@ -155,6 +155,30 @@ float VR_BodyYawFromSetAngle(float new_yaw, float head_yaw) {
 	return normalize180(new_yaw - head_yaw);
 }
 
+// Corners of the 2D panel: a rectangle of width_units x width_units / aspect centred on `center`,
+// perpendicular to the direction (yaw, pitch) (Quake angles, degrees) and facing back at a viewer
+// looking along it. Order: top-left, top-right, bottom-right, bottom-left, as the viewer sees them.
+void VR_PanelCorners(const float center[3], float yaw, float pitch, float width_units,
+                     float aspect, float out[4][3]) {
+	const float angles[3] = {pitch, yaw, 0.0f};
+	glm::vec3 fwd, right, up;
+	quake_angle_vectors(angles, fwd, right, up);
+	const float hw = 0.5f * width_units;
+	const float hh = aspect > 0.0f ? 0.5f * width_units / aspect : 0.0f;
+	const glm::vec3 c(center[0], center[1], center[2]);
+	const glm::vec3 p[4] = {
+		c - right * hw + up * hh,   // top-left
+		c + right * hw + up * hh,   // top-right
+		c + right * hw - up * hh,   // bottom-right
+		c - right * hw - up * hh,   // bottom-left
+	};
+	for (int i = 0; i < 4; ++i) {
+		out[i][0] = p[i].x;
+		out[i][1] = p[i].y;
+		out[i][2] = p[i].z;
+	}
+}
+
 // Fixed 72 Hz server clock. Accumulates the render dt and returns how many 1/72 s ticks are due,
 // at most kMaxSimTicks; whatever is left over beyond that is discarded (no catch-up burst).
 // While paused nothing is accumulated and no ticks are due.

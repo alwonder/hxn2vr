@@ -20,6 +20,7 @@ namespace {
 hxvr::GlExt g_gl;
 bool g_glLoaded = false;
 std::unique_ptr<hxvr::EyeTargets> g_targets;
+std::unique_ptr<hxvr::PanelTarget> g_panel;
 std::unique_ptr<hxvr::Backend> g_backend;
 vr_host_t g_host{};
 
@@ -30,8 +31,7 @@ bool g_frameRender = false;   // FrameInfo::render of the pending frame
 bool g_eyeAcquired[2] = {false, false};
 bool g_eyeBound[2] = {false, false};
 bool g_warnedTargets = false;
-
-void zero3(float out[3]) { out[0] = out[1] = out[2] = 0.0f; }
+bool g_warnedPanel = false;
 
 // Copies msg into err, truncating to errlen and always NUL-terminating (when errlen > 0).
 void set_error(char *err, int errlen, const std::string &msg) {
@@ -73,6 +73,7 @@ void finish_frame() {
 		if (g_eyeAcquired[eye]) g_backend->releaseEye(eye);
 		g_eyeAcquired[eye] = false;
 	}
+	if (g_panel) g_panel->end();   // a panel pass cut short by a longjmp
 	if (g_framePending) g_backend->endFrame();
 	g_framePending = false;
 	g_frameRender = false;
@@ -121,9 +122,13 @@ int  VR_Start(const vr_host_t *host, const vr_start_params_t *p, char *err, int 
 		return 0;
 	}
 	g_backend = std::move(backend);
-	if (gl) g_targets = std::make_unique<hxvr::EyeTargets>(gl);
+	if (gl) {
+		g_targets = std::make_unique<hxvr::EyeTargets>(gl);
+		g_panel = std::make_unique<hxvr::PanelTarget>(gl);
+	}
 	g_framePending = false;
 	g_warnedTargets = false;
+	g_warnedPanel = false;
 	return 1;
 }
 void VR_Stop(void) {
@@ -132,6 +137,7 @@ void VR_Stop(void) {
 		g_backend->stop();
 		g_backend.reset();
 	}
+	g_panel.reset();
 	g_targets.reset();   // GL context is still current (VR stops before the window goes away)
 	g_framePending = false;
 	g_frameRender = false;
@@ -190,12 +196,21 @@ void VR_EndEye(int eye, int mirror_mode, int win_w, int win_h) {
 	g_eyeAcquired[eye] = false;
 }
 void VR_EndFrame(void) { finish_frame(); }
-void VR_BeginPanel(int, int) {}
-void VR_EndPanel(void) {}
-void VR_DrawPanelQuad(const float[4][3]) {}
-
-void VR_PanelCorners(const float[3], float, float, float, float, float out[4][3]) {
-	for (int i = 0; i < 4; ++i) zero3(out[i]);
+int  VR_BeginPanel(int w, int h) {
+	if (!g_backend || !g_panel) return 0;
+	if (g_panel->begin(glm::ivec2(w, h))) return 1;
+	if (!g_panel->active() && !g_warnedPanel) {
+		print("VR: 2D panel target unavailable");
+		g_warnedPanel = true;
+	}
+	return 0;
+}
+void VR_EndPanel(void) {
+	if (g_panel) g_panel->end();
+}
+void VR_DrawPanelQuad(const float corners[4][3]) {
+	if (!g_backend || !g_panel || !corners) return;
+	g_panel->drawQuad(corners);
 }
 
 }  // extern "C"

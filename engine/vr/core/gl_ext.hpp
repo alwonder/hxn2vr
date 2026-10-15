@@ -47,6 +47,26 @@ constexpr GLenum kScissorTest = 0x0C11;
 constexpr GLbitfield kColorBufferBit = 0x00004000;
 constexpr GLbitfield kDepthBufferBit = 0x00000100;
 constexpr GLbitfield kStencilBufferBit = 0x00000400;
+constexpr GLenum kFramebufferBinding = 0x8CA6;
+constexpr GLenum kViewport = 0x0BA2;
+constexpr GLenum kColorClearValue = 0x0C22;
+constexpr GLenum kBlend = 0x0BE2;
+constexpr GLenum kDepthTest = 0x0B71;
+constexpr GLenum kCullFace = 0x0B44;
+constexpr GLenum kAlphaTest = 0x0BC0;
+constexpr GLenum kLighting = 0x0B50;
+constexpr GLenum kFog = 0x0B60;
+constexpr GLenum kStencilTest = 0x0B90;
+constexpr GLenum kSrcAlpha = 0x0302;
+constexpr GLenum kOneMinusSrcAlpha = 0x0303;
+constexpr GLenum kQuads = 0x0007;
+constexpr GLenum kTextureEnv = 0x2300;
+constexpr GLenum kTextureEnvMode = 0x2200;
+constexpr GLenum kModulate = 0x2100;
+constexpr GLbitfield kCurrentBit = 0x00000001;
+constexpr GLbitfield kPolygonBit = 0x00000008;
+constexpr GLbitfield kEnableBit = 0x00002000;
+constexpr GLbitfield kTextureBit = 0x00040000;
 }  // namespace gl
 
 struct GlExt {
@@ -77,6 +97,19 @@ struct GlExt {
 	void (HXVR_GLAPI *glViewport)(gl::GLint, gl::GLint, gl::GLsizei, gl::GLsizei) = nullptr;
 	gl::GLenum (HXVR_GLAPI *glGetError)() = nullptr;
 	void (HXVR_GLAPI *glFlush)() = nullptr;
+	void (HXVR_GLAPI *glGetFloatv)(gl::GLenum, gl::GLfloat *) = nullptr;
+	void (HXVR_GLAPI *glClearColor)(gl::GLfloat, gl::GLfloat, gl::GLfloat, gl::GLfloat) = nullptr;
+	void (HXVR_GLAPI *glClear)(gl::GLbitfield) = nullptr;
+	void (HXVR_GLAPI *glBlendFunc)(gl::GLenum, gl::GLenum) = nullptr;
+	void (HXVR_GLAPI *glDepthMask)(gl::GLboolean) = nullptr;
+	void (HXVR_GLAPI *glTexEnvf)(gl::GLenum, gl::GLenum, gl::GLfloat) = nullptr;
+	void (HXVR_GLAPI *glPushAttrib)(gl::GLbitfield) = nullptr;
+	void (HXVR_GLAPI *glPopAttrib)() = nullptr;
+	void (HXVR_GLAPI *glBegin)(gl::GLenum) = nullptr;
+	void (HXVR_GLAPI *glEnd)() = nullptr;
+	void (HXVR_GLAPI *glColor4f)(gl::GLfloat, gl::GLfloat, gl::GLfloat, gl::GLfloat) = nullptr;
+	void (HXVR_GLAPI *glTexCoord2f)(gl::GLfloat, gl::GLfloat) = nullptr;
+	void (HXVR_GLAPI *glVertex3f)(gl::GLfloat, gl::GLfloat, gl::GLfloat) = nullptr;
 
 	// Resolves every entry point. On failure returns false, names the missing function in `err`
 	// and leaves the struct in an unusable (partially loaded) state.

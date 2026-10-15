@@ -53,7 +53,16 @@ void VR_GetEyeSize(int *w, int *h);
 int  VR_BeginEye(int eye);
 void VR_EndEye(int eye, int mirror_mode, int win_w, int win_h);
 void VR_EndFrame(void);
-void VR_BeginPanel(int w, int h);
+/* The engine's 2D layer is drawn into an offscreen w x h RGBA8 panel texture (any frame; the panel
+ * is independent of the eyes): VR_BeginPanel binds the panel framebuffer, clears it to (0,0,0,0)
+ * and returns 1 (0 = unavailable: do not draw); VR_EndPanel rebinds whatever framebuffer and
+ * viewport were bound before (no-op without a panel pass; a frame ended by VR_EndFrame /
+ * VR_BeginFrame / VR_Stop also ends it). VR_DrawPanelQuad draws the panel texture as an
+ * alpha-blended quad (corners: top-left, top-right, bottom-right, bottom-left, e.g. from
+ * VR_PanelCorners) in the currently bound framebuffer with the currently loaded matrices; depth
+ * test and writes are off (the panel is on top of the world) and every GL state it touches is
+ * restored. Call it between VR_BeginEye and VR_EndEye. */
+int  VR_BeginPanel(int w, int h);
 void VR_EndPanel(void);
 void VR_DrawPanelQuad(const float corners[4][3]);
 

@@ -46,6 +46,19 @@ bool GlExt::load(void *(*getProc)(const char *), std::string &err) {
 	HXVR_GL(glViewport)
 	HXVR_GL(glGetError)
 	HXVR_GL(glFlush)
+	HXVR_GL(glGetFloatv)
+	HXVR_GL(glClearColor)
+	HXVR_GL(glClear)
+	HXVR_GL(glBlendFunc)
+	HXVR_GL(glDepthMask)
+	HXVR_GL(glTexEnvf)
+	HXVR_GL(glPushAttrib)
+	HXVR_GL(glPopAttrib)
+	HXVR_GL(glBegin)
+	HXVR_GL(glEnd)
+	HXVR_GL(glColor4f)
+	HXVR_GL(glTexCoord2f)
+	HXVR_GL(glVertex3f)
 #undef HXVR_GL
 	return true;
 }

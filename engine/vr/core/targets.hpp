@@ -48,4 +48,41 @@ private:
 	bool complete_[2] = {false, false};
 };
 
+
+// Offscreen texture for the engine's 2D layer (menus, console, HUD) and the world-space quad that
+// shows it. One RGBA8 texture + FBO, recreated when the size changes. All GL calls go through
+// GlExt; a GL context must be current.
+class PanelTarget {
+public:
+	explicit PanelTarget(const GlExt *gl) : gl_(gl) {}
+	~PanelTarget() { destroy(); }
+	PanelTarget(const PanelTarget &) = delete;
+	PanelTarget &operator=(const PanelTarget &) = delete;
+
+	// Binds the panel FBO (remembering the framebuffer and viewport that were bound), recreating
+	// it for `size` if needed, and clears it to (0,0,0,0). Returns false (nothing bound, nothing to
+	// end) if the target is unavailable or a panel pass is already open.
+	bool begin(glm::ivec2 size);
+	// Restores the framebuffer and viewport that begin() saw. No-op without an open pass.
+	void end();
+	bool active() const { return active_; }
+	// Alpha-blended textured quad (corners: top-left, top-right, bottom-right, bottom-left), depth
+	// test and writes off. Uses the matrices currently loaded; every GL state it touches is
+	// restored. No-op while a pass is open (the texture is the render target) or without a texture.
+	void drawQuad(const float corners[4][3]);
+	void destroy();
+
+private:
+	bool ensure(glm::ivec2 size);
+
+	const GlExt *gl_;
+	glm::ivec2 size_{0, 0};
+	unsigned fbo_ = 0;
+	unsigned tex_ = 0;
+	bool complete_ = false;
+	bool active_ = false;
+	int prevFbo_ = 0;
+	int prevViewport_[4] = {0, 0, 0, 0};
+};
+
 }  // namespace hxvr

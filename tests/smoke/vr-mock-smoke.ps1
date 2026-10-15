@@ -7,9 +7,8 @@
   Scenarios (run-smoke.ps1 does the actual run):
     a  map demo1                       -> check_shot.py --stereo
     b  map demo1, changelevel demo2    -> check_shot.py --stereo
-    c  no map (console only)           -> check_shot.py (not flat). PENDING until Task 1.8 (2D
-       panel): without the panel the eyes are a uniform clear colour, so this scenario is
-       expected to FAIL now; it only runs with -IncludePending.
+    c  no map (console only)           -> check_shot.py (not flat): the console is drawn into the 2D
+       panel; without the panel the eyes would be a uniform clear colour.
 
   check_shot --stereo alone cannot prove VR ran, so every run also uses -condebug and the
   console log must contain `VR: started (mock)` and no `VR:` error line (`VR: recentered` is allowed;
@@ -60,7 +59,7 @@ $vrArgs = @('-condebug', '+vr_backend', 'mock', '+vr_mirror', '2', '+vr_enabled'
 $all = [ordered]@{
     a = @{ Commands = @('map demo1'); Stereo = $true; Pending = $false; Recenter = $true }   # auto-recenter must have run
     b = @{ Commands = @('map demo1', 'changelevel demo2'); Stereo = $true; Pending = $false }
-    c = @{ Commands = @('echo vr-mock-smoke: console only'); Stereo = $false; Pending = $true }   # until Task 1.8
+    c = @{ Commands = @('echo vr-mock-smoke: console only'); Stereo = $false; Pending = $false }   # 2D panel with no world
 }
 
 function Test-VrLog([string]$path, [bool]$requireRecenter) {

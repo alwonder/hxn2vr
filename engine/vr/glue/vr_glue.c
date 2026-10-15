@@ -61,6 +61,19 @@ static qboolean		vrg_eye_active;
 static vr_fov_t		vrg_eye_fov;
 static int		vrg_eye_w, vrg_eye_h;
 
+/* 2D panel placement (Quake world coordinates). In key_game with a world the panel follows the
+ * body (recomputed every frame); otherwise it is fixed at an anchor taken from the head pose when
+ * the key_dest leaves key_game, when there is no world (or the world changed), and on vr_recenter. */
+static qboolean		vrg_panel_valid;	/* vrg_panel_pos/vrg_panel_yaw hold a fixed anchor */
+static vec3_t		vrg_panel_pos;
+static float		vrg_panel_yaw;
+static keydest_t	vrg_panel_dest;		/* key_dest of the previous frame */
+static qboolean		vrg_panel_world;	/* the previous frame had a world */
+static const void	*vrg_panel_model;	/* ... and this world model */
+static qboolean		vrg_panel_reanchor;	/* vr_recenter: take a new anchor */
+static qboolean		vrg_panel_open;		/* VR_BeginPanel done, VR_EndPanel not yet */
+static qboolean		vrg_in_update;		/* inside VRG_UpdateScreen (Con_Printf can re-enter) */
+
 /* desktop window swap interval, saved while VR runs (the headset paces frames, not the monitor) */
 typedef BOOL (WINAPI *vrg_swapinterval_f) (int);
 typedef int (WINAPI *vrg_getswapinterval_f) (void);
@@ -130,6 +143,10 @@ static void VRG_RestoreSwapInterval (void)
 static void VRG_EndFrame (void)
 {
 	vrg_eye_active = false;
+	if (vrg_panel_open)
+		VR_EndPanel ();		/* a panel pass cut short (Host_Error longjmp) */
+	vrg_panel_open = false;
+	vrg_in_update = false;
 	if (vrg_frame_pending)
 		VR_EndFrame ();
 	vrg_frame_pending = false;
@@ -179,6 +196,10 @@ static void VRG_Start (void)
 	vrg_body_valid = false;
 	memset (&vrg_anchor, 0, sizeof(vrg_anchor));
 	vrg_recenter_pending = true;
+	vrg_panel_valid = false;
+	vrg_panel_reanchor = false;
+	vrg_panel_open = false;
+	vrg_in_update = false;
 	vrg_dbg_frames = vrg_dbg_ticks = 0;
 	vrg_dbg_start = Sys_DoubleTime ();
 	vrg_frame_pending = false;
@@ -336,6 +357,7 @@ static void VRG_Recenter (void)
 	vrg_anchor.x = pose.pos.x;
 	vrg_anchor.y = 0;
 	vrg_anchor.z = pose.pos.z;
+	vrg_panel_reanchor = true;	/* the fixed 2D panel is placed again in front of the head */
 	Con_SafePrintf ("VR: recentered\n");
 }
 
@@ -385,15 +407,125 @@ static void VRG_ClearColor (float r, float g, float b, GLbitfield extra)
 	glClearColor_fp (saved[0], saved[1], saved[2], saved[3]);
 }
 
+/* ---- 2D panel ---- */
+
+/* Corners of the panel for this frame (see the placement comment at vrg_panel_valid). feet/body_yaw/
+ * upm describe the player (feet is the origin when there is no world); head_org/head_view are the
+ * head's position and composed view angles in the same space. */
+static void VRG_PanelPlace (qboolean world, const vec3_t feet, float body_yaw, float upm,
+				const vec3_t head_org, const vec3_t head_view, float corners[4][3])
+{
+	const keydest_t	dest = Key_GetDest ();
+	const float	dist = vr_panel_distance.value * upm;
+	const float	width = vr_panel_width.value * upm;
+	const float	aspect = (vid.height > 0) ? (float)vid.width / (float)vid.height : 1.0f;
+	const void	*model = world ? (const void *) cl.worldmodel : NULL;
+	float		center[3], ang[3], fwd[3], right[3], up[3];
+	float		yaw, pitch;
+
+	if (world && dest == key_game)
+	{
+		/* follows the body: 35 degrees below the (nominal) eye, vr_panel_distance ahead */
+		vr_vec3_t	eye;
+
+		eye.x = vrg_anchor.x;
+		eye.y = vr_eye_height.value;
+		eye.z = vrg_anchor.z;
+		VR_EyeOrigin (feet, body_yaw, &eye, &vrg_anchor, upm, center);
+		yaw = body_yaw;
+		pitch = 35.0f;
+		ang[0] = pitch;
+		ang[1] = yaw;
+		ang[2] = 0;
+		AngleVectors (ang, fwd, right, up);
+		VectorMA (center, dist, fwd, center);
+	}
+	else
+	{
+		if (!vrg_panel_valid || vrg_panel_reanchor ||
+		    world != vrg_panel_world || model != vrg_panel_model ||
+		    (vrg_panel_dest == key_game && dest != key_game))
+		{
+			/* in front of the head, along its heading in the world, at eye level */
+			const double	a = head_view[YAW] * (3.14159265358979323846 / 180.0);
+
+			vrg_panel_pos[0] = head_org[0] + dist * (float) cos (a);
+			vrg_panel_pos[1] = head_org[1] + dist * (float) sin (a);
+			vrg_panel_pos[2] = head_org[2];
+			vrg_panel_yaw = head_view[YAW];
+			vrg_panel_valid = true;
+			vrg_panel_reanchor = false;
+		}
+		VectorCopy (vrg_panel_pos, center);
+		yaw = vrg_panel_yaw;
+		pitch = 0;
+	}
+	vrg_panel_dest = dest;
+	vrg_panel_world = world;
+	vrg_panel_model = model;
+	VR_PanelCorners (center, yaw, pitch, width, aspect, corners);
+}
+
+/* Renders the engine's 2D layer into the panel texture. The 2D code works in glx/gly/glwidth/
+ * glheight (set by GL_BeginRendering each frame) and vid.width/height; the panel is vid.width x
+ * vid.height pixels. Returns true if the panel texture is ready to be drawn. */
+static qboolean VRG_RenderPanel (void)
+{
+	const int	sx = glx, sy = gly, sw = glwidth, sh = glheight;
+
+	if (vid.width <= 0 || vid.height <= 0 || !VR_BeginPanel (vid.width, vid.height))
+		return false;
+	vrg_panel_open = true;
+	glx = gly = 0;
+	glwidth = vid.width;
+	glheight = vid.height;
+	SCR_Draw2DForVR ();
+	glx = sx;
+	gly = sy;
+	glwidth = sw;
+	glheight = sh;
+	vrg_panel_open = false;
+	VR_EndPanel ();
+	return true;
+}
+
+/* Draws the panel quad into the bound eye with the eye's projection and view matrices. */
+static void VRG_DrawPanel (const float corners[4][3], const vec3_t org, const vec3_t ang)
+{
+	float	proj[16], view[16];
+	float	znear = vr_nearclip.value;
+
+	if (!(znear >= 0.1f))
+		znear = 0.1f;
+	VR_ProjectionMatrix (&vrg_eye_fov, znear, 4096.0f, proj);
+	VR_QuakeViewMatrix (org, ang, view);
+
+	glViewport_fp (0, 0, vrg_eye_w, vrg_eye_h);
+	glMatrixMode_fp (GL_PROJECTION);
+	glPushMatrix_fp ();
+	glLoadMatrixf_fp (proj);
+	glMatrixMode_fp (GL_MODELVIEW);
+	glPushMatrix_fp ();
+	glLoadMatrixf_fp (view);
+	VR_DrawPanelQuad (corners);
+	glPopMatrix_fp ();
+	glMatrixMode_fp (GL_PROJECTION);
+	glPopMatrix_fp ();
+	glMatrixMode_fp (GL_MODELVIEW);
+}
+
 qboolean VRG_UpdateScreen (void)
 {
 	int		eye, numvis = 0;
-	qboolean	world;
-	vec3_t		feet, save_org, save_ang, head_ang, org;
-	float		body_yaw = 0, upm = 0;
+	qboolean	world, panel;
+	vec3_t		feet, save_org, save_ang, head_ang, eye_org, eye_ang, head_org, head_view;
+	float		body_yaw, upm;
+	float		corners[4][3];
 	vr_pose_t	pose;
 	vr_vec3_t	anchor = vrg_anchor;
 
+	if (vrg_in_update)
+		return true;	/* re-entered (Con_Printf during signon) while this frame is being drawn */
 	if (!vrg_frame_pending)
 		return false;	/* VR off, or this host frame's VR frame was already submitted */
 	if (!vrg_active)
@@ -401,8 +533,12 @@ qboolean VRG_UpdateScreen (void)
 		VRG_EndFrame ();	/* not rendering: the window takes the flat path */
 		return false;
 	}
+	vrg_in_update = true;
 
 	world = (cls.state == ca_connected && cl.worldmodel && !con_forcedup);
+	VectorClear (feet);
+	body_yaw = vrg_body_yaw;
+	upm = VR_UnitsPerMetre (vr_eye_height.value, vr_world_scale.value);
 	if (world)
 	{
 		V_SetupRefdef ();
@@ -411,21 +547,30 @@ qboolean VRG_UpdateScreen (void)
 		VectorCopy (r_refdef.vieworg, feet);
 		feet[2] -= cl.viewheight;
 		numvis = cl_numvisedicts;	/* R_DrawWorld appends static entities on every pass */
-		body_yaw = vrg_body_yaw;
-		upm = VR_UnitsPerMetre (vr_eye_height.value, vr_world_scale.value);
 	}
+
+	/* the 2D layer (menus, console, HUD, centerprint...) goes into the panel texture first;
+	 * without a world the player stands at the origin */
+	VR_GetHeadPose (&pose);
+	VR_EyeOrigin (feet, body_yaw, &pose.pos, &anchor, upm, head_org);
+	VR_TrackingToQuakeAngles (&pose.rot, head_ang);
+	VR_ComposeViewAngles (body_yaw, head_ang, head_view);
+	VRG_PanelPlace (world, feet, body_yaw, upm, head_org, head_view, corners);
+	panel = VRG_RenderPanel ();
 
 	VR_GetEyeSize (&vrg_eye_w, &vrg_eye_h);
 	for (eye = 0; eye < 2; eye++)
 	{
 		if (VR_BeginEye (eye))
 		{
+			VR_GetEye (eye, &pose, &vrg_eye_fov);
+			VR_EyeOrigin (feet, body_yaw, &pose.pos, &anchor, upm, eye_org);
+			VR_TrackingToQuakeAngles (&pose.rot, head_ang);
+			VR_ComposeViewAngles (body_yaw, head_ang, eye_ang);
 			if (world)
 			{
-				VR_GetEye (eye, &pose, &vrg_eye_fov);
-				VR_EyeOrigin (feet, body_yaw, &pose.pos, &anchor, upm, r_refdef.vieworg);
-				VR_TrackingToQuakeAngles (&pose.rot, head_ang);
-				VR_ComposeViewAngles (body_yaw, head_ang, r_refdef.viewangles);
+				VectorCopy (eye_org, r_refdef.vieworg);
+				VectorCopy (eye_ang, r_refdef.viewangles);
 				cl_numvisedicts = numvis;
 				vrg_eye_active = true;
 				R_PushDlights ();	/* per eye: R_SetupFrame advances r_framecount */
@@ -436,6 +581,8 @@ qboolean VRG_UpdateScreen (void)
 			{
 				VRG_ClearColor (0.05f, 0.05f, 0.05f, GL_DEPTH_BUFFER_BIT);
 			}
+			if (panel)
+				VRG_DrawPanel ((const float (*)[3]) corners, eye_org, eye_ang);
 		}
 		VR_EndEye (eye, vr_mirror.integer, glwidth, glheight);
 	}
@@ -447,12 +594,8 @@ qboolean VRG_UpdateScreen (void)
 		VectorCopy (save_ang, r_refdef.viewangles);
 		/* the eye passes left r_origin/vpn/vright/vup at the right eye: put them at the head
 		 * for the sound listener (S_Update) and anything else reading them after the refresh */
-		VR_GetHeadPose (&pose);
-		VR_EyeOrigin (feet, body_yaw, &pose.pos, &anchor, upm, org);
-		VR_TrackingToQuakeAngles (&pose.rot, head_ang);
-		VR_ComposeViewAngles (body_yaw, head_ang, head_ang);
-		VectorCopy (org, r_origin);
-		AngleVectors (head_ang, vpn, vright, vup);
+		VectorCopy (head_org, r_origin);
+		AngleVectors (head_view, vpn, vright, vup);
 	}
 
 	VRG_EndFrame ();
