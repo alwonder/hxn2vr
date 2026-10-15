@@ -28,6 +28,14 @@ struct StartParams { float renderScale; float eyeHeightM; bool mockMotion; float
 //  - GL work (eye textures, swapchains) happens on the thread with the engine's GL context
 //    current, in start/stop/acquire/release/endFrame and the destructor.
 //  - The GlExt passed to the factory outlives the backend (vr_module.cpp owns it).
+// Guarantees of every backend to the caller:
+//  - FrameInfo::render == true => headPose(), eyePose() and eyeFov() are this frame's located,
+//    valid poses (OpenXR: views and head located with ORIENTATION_VALID and POSITION_VALID; a frame
+//    whose poses are not valid is reported as render = false and submits no layer). The glue
+//    auto-recenters on the first rendered frame and relies on this. Without a rendered frame yet,
+//    headPose() is identity at (0, eyeHeightM, 0); otherwise the last valid pose.
+//  - eyeSize() is fixed between start() and stop(). acquireEye() may return a different texture
+//    name every frame (OpenXR swapchains rotate 2-3 images per eye).
 class Backend {
 public:
 	virtual ~Backend() = default;
@@ -47,7 +55,13 @@ public:
 // Fake headset. `GlExt` may be null (tests): the mock then never touches GL and acquireEye returns 0.
 // StartParams::mockHz <= 0 disables frame pacing in beginFrame (so tests never sleep).
 std::unique_ptr<Backend> makeMockBackend(const GlExt*);
-// Real OpenXR runtime. Declared here; defined by the OpenXR backend task (not yet linked).
+// Real OpenXR runtime (backend_openxr.cpp, XR_KHR_opengl_enable on the GL context current at
+// start()). `print` (may be null) receives status lines ("VR: ..."); it is only called on the
+// engine thread. GlExt must be non-null, or start() fails. FrameInfo: render = shouldRender &&
+// session running && poses valid; focused = session FOCUSED; lost = LOSS_PENDING / EXITING /
+// instance loss / failed frame calls / the current GL context is not the one the session was
+// created with (then no XR or GL call is made; stop() and a new start() are needed). While the
+// session is not running (IDLE) beginFrame sleeps ~10 ms instead of calling xrWaitFrame.
 std::unique_ptr<Backend> makeOpenXrBackend(const GlExt*, void (*print)(const char*));
 
 }  // namespace hxvr

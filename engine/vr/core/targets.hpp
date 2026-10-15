@@ -46,6 +46,11 @@ private:
 	unsigned depth_[2] = {0, 0};
 	unsigned attached_[2] = {0, 0};   // colour texture currently attached to each FBO
 	bool complete_[2] = {false, false};
+	// Swapchain images rotate (2-3 names per eye): names already found complete on this eye's FBO,
+	// so a returning name is re-attached without another glCheckFramebufferStatus.
+	static constexpr int kKnownComplete = 4;
+	unsigned known_[2][kKnownComplete] = {};
+	int knownNext_[2] = {0, 0};
 };
 
 

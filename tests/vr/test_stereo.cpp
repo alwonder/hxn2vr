@@ -185,3 +185,78 @@ TEST_CASE("eye API refuses eyes in a non-rendering frame; endFrame follows every
 	CHECK(log.stops == 1);
 	CHECK(VR_IsRunning() == 0);
 }
+
+namespace {
+
+// Minimal fake GL for EyeTargets: counts attachments and completeness checks.
+struct FakeFbo {
+	int attaches = 0, statusChecks = 0;
+	unsigned incomplete = 0;   // texture name the fake reports as incomplete
+	unsigned attached = 0;
+};
+FakeFbo g_fbo;
+unsigned g_nextName = 100;
+
+void HXVR_GLAPI fakeGen(hxvr::gl::GLsizei n, hxvr::gl::GLuint *out) {
+	for (int i = 0; i < n; ++i) out[i] = g_nextName++;
+}
+void HXVR_GLAPI fakeDel(hxvr::gl::GLsizei, const hxvr::gl::GLuint *) {}
+void HXVR_GLAPI fakeBind(hxvr::gl::GLenum, hxvr::gl::GLuint) {}
+void HXVR_GLAPI fakeRbStorage(hxvr::gl::GLenum, hxvr::gl::GLenum, hxvr::gl::GLsizei, hxvr::gl::GLsizei) {}
+void HXVR_GLAPI fakeFbRb(hxvr::gl::GLenum, hxvr::gl::GLenum, hxvr::gl::GLenum, hxvr::gl::GLuint) {}
+void HXVR_GLAPI fakeFbTex(hxvr::gl::GLenum, hxvr::gl::GLenum, hxvr::gl::GLenum, hxvr::gl::GLuint tex, hxvr::gl::GLint) {
+	++g_fbo.attaches;
+	g_fbo.attached = tex;
+}
+hxvr::gl::GLenum HXVR_GLAPI fakeStatus(hxvr::gl::GLenum) {
+	++g_fbo.statusChecks;
+	return g_fbo.attached == g_fbo.incomplete ? 0x8CD6u : hxvr::gl::kFramebufferComplete;
+}
+void HXVR_GLAPI fakeGetInt(hxvr::gl::GLenum, hxvr::gl::GLint *v) { *v = 0; }
+
+hxvr::GlExt fakeFboGl() {
+	hxvr::GlExt gl;
+	gl.glGenFramebuffers = fakeGen;
+	gl.glGenRenderbuffers = fakeGen;
+	gl.glDeleteFramebuffers = fakeDel;
+	gl.glDeleteRenderbuffers = fakeDel;
+	gl.glBindFramebuffer = fakeBind;
+	gl.glBindRenderbuffer = fakeBind;
+	gl.glRenderbufferStorage = fakeRbStorage;
+	gl.glFramebufferRenderbuffer = fakeFbRb;
+	gl.glFramebufferTexture2D = fakeFbTex;
+	gl.glCheckFramebufferStatus = fakeStatus;
+	gl.glGetIntegerv = fakeGetInt;
+	return gl;
+}
+
+}  // namespace
+
+TEST_CASE("eye targets: rotating swapchain images are re-attached, completeness checked once per name") {
+	g_fbo = FakeFbo{};
+	const hxvr::GlExt gl = fakeFboGl();
+	hxvr::EyeTargets t(&gl);
+	REQUIRE(t.ensure(glm::ivec2(64, 64)));
+	const unsigned names[3] = {7, 8, 9};   // an OpenXR swapchain with 3 images
+	for (int frame = 0; frame < 9; ++frame) {
+		CHECK(t.bind(names[frame % 3], 0));
+		t.unbind();
+	}
+	CHECK(g_fbo.attaches == 9);        // a different image every frame: attached every frame
+	CHECK(g_fbo.statusChecks == 3);    // but each name is checked only the first time
+	CHECK(t.bind(9, 0));               // same name as attached: nothing to do
+	CHECK(g_fbo.attaches == 9);
+
+	// an incomplete image is refused every time it comes round, and re-checked (not cached)
+	g_fbo.incomplete = 10;
+	CHECK_FALSE(t.bind(10, 1));
+	CHECK(t.bind(7, 1));
+	CHECK_FALSE(t.bind(10, 1));
+	CHECK(g_fbo.statusChecks == 3 + 3);
+
+	// new FBOs (size change) forget what was checked
+	REQUIRE(t.ensure(glm::ivec2(32, 32)));
+	CHECK(t.bind(7, 0));
+	CHECK(g_fbo.statusChecks == 7);
+	t.destroy();
+}

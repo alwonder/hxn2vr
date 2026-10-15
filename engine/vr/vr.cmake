@@ -25,14 +25,16 @@ add_library(hxvr STATIC
     ${HXVR_DIR}/core/backend_mock.cpp
     ${HXVR_DIR}/core/gl_ext.cpp
     ${HXVR_DIR}/core/targets.cpp
+    ${HXVR_DIR}/core/xr_logic.cpp
+    ${HXVR_DIR}/core/backend_openxr.cpp
 )
 target_compile_features(hxvr PUBLIC cxx_std_20)
 set_target_properties(hxvr PROPERTIES CXX_EXTENSIONS OFF MSVC_RUNTIME_LIBRARY "${HXVR_MSVC_RUNTIME}")
 target_include_directories(hxvr
     PUBLIC  ${HXVR_DIR}/include
-    PRIVATE ${HXVR_DIR}/core ${HXVR_EXTERNAL}/glm)
+    PRIVATE ${HXVR_DIR}/core ${HXVR_EXTERNAL}/glm ${HXVR_EXTERNAL}/openxr-sdk/include)
 target_compile_definitions(hxvr PRIVATE GLM_FORCE_RADIANS _CRT_SECURE_NO_WARNINGS)
-target_link_libraries(hxvr PRIVATE openxr_loader)
+target_link_libraries(hxvr PRIVATE openxr_loader opengl32)   # opengl32: wglGetCurrentContext/DC
 if(MSVC)
     target_compile_options(hxvr PRIVATE /W4 /permissive-)
 endif()
@@ -49,10 +51,12 @@ add_executable(vr_tests
     ${CMAKE_SOURCE_DIR}/tests/vr/test_stereo.cpp
     ${CMAKE_SOURCE_DIR}/tests/vr/test_view.cpp
     ${CMAKE_SOURCE_DIR}/tests/vr/test_panel.cpp
+    ${CMAKE_SOURCE_DIR}/tests/vr/test_xr_logic.cpp
 )
 target_compile_features(vr_tests PRIVATE cxx_std_20)
 set_target_properties(vr_tests PROPERTIES CXX_EXTENSIONS OFF MSVC_RUNTIME_LIBRARY "${HXVR_MSVC_RUNTIME}")
-target_include_directories(vr_tests PRIVATE ${HXVR_DIR}/core ${HXVR_EXTERNAL}/doctest ${HXVR_EXTERNAL}/glm)
+target_include_directories(vr_tests PRIVATE ${HXVR_DIR}/core ${HXVR_EXTERNAL}/doctest ${HXVR_EXTERNAL}/glm
+    ${HXVR_EXTERNAL}/openxr-sdk/include)
 target_link_libraries(vr_tests PRIVATE hxvr)
 if(MSVC)
     target_compile_options(vr_tests PRIVATE /W4 /permissive-)

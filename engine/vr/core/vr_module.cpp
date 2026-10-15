@@ -109,8 +109,8 @@ int  VR_Start(const vr_host_t *host, const vr_start_params_t *p, char *err, int 
 		backend = hxvr::makeMockBackend(gl);
 		break;
 	case VR_BACKEND_OPENXR:
-		fail(err, errlen, "OpenXR backend not available yet");
-		return 0;
+		backend = hxvr::makeOpenXrBackend(gl, g_host.print);
+		break;
 	default:
 		fail(err, errlen, "VR_Start: unknown backend");
 		return 0;

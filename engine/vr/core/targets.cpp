@@ -63,10 +63,17 @@ bool EyeTargets::bind(unsigned colorTex, int eye) {
 	if (!gl_ || eye < 0 || eye > 1 || !fbo_[eye] || !colorTex) return false;
 	gl_->glBindFramebuffer(gl::kFramebuffer, fbo_[eye]);
 	if (attached_[eye] != colorTex) {
-		// Swapchain images rotate: attach this frame's texture (cheap; status checked on change).
+		// Swapchain images rotate: attach this frame's texture (cheap). The completeness check runs
+		// once per image name; incomplete names are not remembered, so they are re-checked.
 		gl_->glFramebufferTexture2D(gl::kFramebuffer, gl::kColorAttachment0, gl::kTexture2D, colorTex, 0);
 		attached_[eye] = colorTex;
-		complete_[eye] = gl_->glCheckFramebufferStatus(gl::kFramebuffer) == gl::kFramebufferComplete;
+		bool known = false;
+		for (unsigned k : known_[eye]) known = known || k == colorTex;
+		complete_[eye] = known || gl_->glCheckFramebufferStatus(gl::kFramebuffer) == gl::kFramebufferComplete;
+		if (complete_[eye] && !known) {
+			known_[eye][knownNext_[eye]] = colorTex;
+			knownNext_[eye] = (knownNext_[eye] + 1) % kKnownComplete;
+		}
 	}
 	if (!complete_[eye]) {
 		gl_->glBindFramebuffer(gl::kFramebuffer, 0);
@@ -100,6 +107,8 @@ void EyeTargets::destroy() {
 	for (int i = 0; i < 2; ++i) {
 		fbo_[i] = depth_[i] = attached_[i] = 0;
 		complete_[i] = false;
+		for (unsigned &k : known_[i]) k = 0;
+		knownNext_[i] = 0;
 	}
 	size_ = glm::ivec2(0, 0);
 }

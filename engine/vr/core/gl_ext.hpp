@@ -48,6 +48,8 @@ constexpr GLbitfield kColorBufferBit = 0x00004000;
 constexpr GLbitfield kDepthBufferBit = 0x00000100;
 constexpr GLbitfield kStencilBufferBit = 0x00000400;
 constexpr GLenum kFramebufferBinding = 0x8CA6;
+constexpr GLenum kReadFramebufferBinding = 0x8CAA;
+constexpr GLenum kVersion = 0x1F02;
 constexpr GLenum kViewport = 0x0BA2;
 constexpr GLenum kColorClearValue = 0x0C22;
 constexpr GLenum kBlend = 0x0BE2;
@@ -97,6 +99,7 @@ struct GlExt {
 	void (HXVR_GLAPI *glViewport)(gl::GLint, gl::GLint, gl::GLsizei, gl::GLsizei) = nullptr;
 	gl::GLenum (HXVR_GLAPI *glGetError)() = nullptr;
 	void (HXVR_GLAPI *glFlush)() = nullptr;
+	const unsigned char *(HXVR_GLAPI *glGetString)(gl::GLenum) = nullptr;
 	void (HXVR_GLAPI *glGetFloatv)(gl::GLenum, gl::GLfloat *) = nullptr;
 	void (HXVR_GLAPI *glClearColor)(gl::GLfloat, gl::GLfloat, gl::GLfloat, gl::GLfloat) = nullptr;
 	void (HXVR_GLAPI *glClear)(gl::GLbitfield) = nullptr;

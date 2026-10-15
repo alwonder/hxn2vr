@@ -46,6 +46,7 @@ bool GlExt::load(void *(*getProc)(const char *), std::string &err) {
 	HXVR_GL(glViewport)
 	HXVR_GL(glGetError)
 	HXVR_GL(glFlush)
+	HXVR_GL(glGetString)
 	HXVR_GL(glGetFloatv)
 	HXVR_GL(glClearColor)
 	HXVR_GL(glClear)
