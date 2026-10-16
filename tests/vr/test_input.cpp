@@ -4,6 +4,7 @@
 #include "vr_api.h"
 #include "vr_module_testing.hpp"
 
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -382,4 +383,94 @@ TEST_CASE("stick repeat start threshold and tie-break") {
 	float left[2] = {-0.8f, 0.1f};
 	CHECK(VR_StickRepeat(&r, centre, 0.016f) == VR_DIR_NONE);
 	CHECK(VR_StickRepeat(&r, left, 0.016f) == VR_DIR_LEFT);
+}
+
+namespace {
+void check_vec2(const float v[2], float x, float y) {
+	CHECK(v[0] == doctest::Approx(x).epsilon(1e-4).scale(1.0));
+	CHECK(v[1] == doctest::Approx(y).epsilon(1e-4).scale(1.0));
+}
+// rotation of `deg` degrees (counterclockwise seen from above) about +y, as an OpenXR quaternion
+vr_quat_t yaw_quat(float deg) {
+	const float h = deg * 3.14159265358979f / 360.0f;
+	return vr_quat_t{0.0f, std::sin(h), 0.0f, std::cos(h)};
+}
+// rotation about +x (positive = pitch up, since -z is forward)
+vr_quat_t pitch_quat(float deg) {
+	const float h = deg * 3.14159265358979f / 360.0f;
+	return vr_quat_t{std::sin(h), 0.0f, 0.0f, std::cos(h)};
+}
+}  // namespace
+
+TEST_CASE("stick deadzone") {   // dz 0.15
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	float out[2];
+	float a[2] = {0.1f, 0.0f};   VR_StickDeadzone(a, 0.15f, out); check_vec2(out, 0.0f, 0.0f);
+	float b[2] = {1.0f, 0.0f};   VR_StickDeadzone(b, 0.15f, out); check_vec2(out, 1.0f, 0.0f);
+	float c[2] = {0.575f, 0.0f}; VR_StickDeadzone(c, 0.15f, out); check_vec2(out, 0.5f, 0.0f);
+	float d[2] = {0.6f, 0.8f};   VR_StickDeadzone(d, 0.15f, out); check_vec2(out, 0.6f, 0.8f);
+	float e[2] = {1.2f, 0.0f};   VR_StickDeadzone(e, 0.15f, out); check_vec2(out, 1.0f, 0.0f);
+	float f[2] = {0.0f, -0.575f}; VR_StickDeadzone(f, 0.15f, out); check_vec2(out, 0.0f, -0.5f);   // radial, any direction
+	float g[2] = {nan, 0.5f};    VR_StickDeadzone(g, 0.15f, out); check_vec2(out, 0.0f, 0.0f);     // non-finite: centred
+	float h[2] = {1.0f, 0.0f};   VR_StickDeadzone(h, nan, out);   check_vec2(out, 1.0f, 0.0f);     // bad deadzone: none
+	float same[2] = {0.575f, 0.0f}; VR_StickDeadzone(same, 0.15f, same); check_vec2(same, 0.5f, 0.0f);   // in == out
+}
+
+TEST_CASE("stick to move in the view frame") {   // speed 200
+	float out[2];
+	const float fwd[2] = {0.0f, 1.0f}, right[2] = {1.0f, 0.0f}, half[2] = {0.0f, 0.5f};
+	VR_StickToMove(fwd, 30.0f, 30.0f, 200.0f, out);    check_vec2(out, 200.0f, 0.0f);
+	VR_StickToMove(right, 30.0f, 30.0f, 200.0f, out);  check_vec2(out, 0.0f, 200.0f);
+	VR_StickToMove(fwd, 120.0f, 30.0f, 200.0f, out);   check_vec2(out, 0.0f, -200.0f);   // hand points left: move left
+	VR_StickToMove(fwd, -60.0f, 30.0f, 200.0f, out);   check_vec2(out, 0.0f, 200.0f);
+	VR_StickToMove(half, 210.0f, 30.0f, 200.0f, out);  check_vec2(out, -100.0f, 0.0f);
+	const float zero[2] = {0.0f, 0.0f};
+	VR_StickToMove(zero, 77.0f, 12.0f, 200.0f, out);   check_vec2(out, 0.0f, 0.0f);
+}
+
+TEST_CASE("move yaw follows the hand") {
+	const vr_quat_t aim = yaw_quat(30.0f);   // turned left
+	CHECK(VR_MoveYaw(1, &aim, 1, 5.0f, 10.0f) == doctest::Approx(40.0f).epsilon(1e-4));
+	CHECK(VR_MoveYaw(0, &aim, 1, 5.0f, 10.0f) == doctest::Approx(15.0f));
+	const vr_quat_t right = yaw_quat(-90.0f);   // turned right
+	CHECK(VR_MoveYaw(1, &right, 1, 5.0f, 10.0f) == doctest::Approx(-80.0f).epsilon(1e-4));
+	const vr_quat_t pitched = pitch_quat(30.0f);   // pitch alone does not change the yaw
+	CHECK(VR_MoveYaw(1, &pitched, 1, 5.0f, 10.0f) == doctest::Approx(10.0f).epsilon(1e-4));
+}
+
+TEST_CASE("move yaw falls back to the head") {
+	const vr_quat_t up = pitch_quat(80.0f);   // projection 0.17 < 0.3
+	CHECK(VR_MoveYaw(1, &up, 1, 5.0f, 10.0f) == doctest::Approx(15.0f));
+	const vr_quat_t aim = yaw_quat(30.0f);
+	CHECK(VR_MoveYaw(1, &aim, 0, 5.0f, 10.0f) == doctest::Approx(15.0f));   // hand not valid
+	CHECK(VR_MoveYaw(1, nullptr, 1, 5.0f, 10.0f) == doctest::Approx(15.0f));
+	const vr_quat_t zero{0.0f, 0.0f, 0.0f, 0.0f};
+	CHECK(VR_MoveYaw(1, &zero, 1, 5.0f, 10.0f) == doctest::Approx(15.0f));   // not a rotation
+	const vr_quat_t down = pitch_quat(-80.0f);
+	CHECK(VR_MoveYaw(1, &down, 1, 5.0f, 10.0f) == doctest::Approx(15.0f));
+}
+
+TEST_CASE("snap turn fires once per push") {   // snap 45
+	vr_turn_t t{};
+	CHECK(VR_TurnStep(&t, 0.8f, 0.016f, 0, 45.0f, 150.0f, 0.15f) == doctest::Approx(-45.0f));
+	CHECK(VR_TurnStep(&t, 0.8f, 0.016f, 0, 45.0f, 150.0f, 0.15f) == 0.0f);
+	CHECK(VR_TurnStep(&t, 0.5f, 0.016f, 0, 45.0f, 150.0f, 0.15f) == 0.0f);   // not re-armed: >= 0.3
+	CHECK(VR_TurnStep(&t, 0.2f, 0.016f, 0, 45.0f, 150.0f, 0.15f) == 0.0f);   // re-armed
+	CHECK(VR_TurnStep(&t, -0.9f, 0.016f, 0, 45.0f, 150.0f, 0.15f) == doctest::Approx(45.0f));
+	CHECK(VR_TurnStep(&t, -0.69f, 0.016f, 0, 45.0f, 150.0f, 0.15f) == 0.0f);
+	CHECK(VR_TurnStep(&t, 0.0f, 0.016f, 0, 45.0f, 150.0f, 0.15f) == 0.0f);
+	CHECK(VR_TurnStep(&t, -0.7f, 0.016f, 0, 90.0f, 150.0f, 0.15f) == doctest::Approx(90.0f));   // 0.7 fires
+	CHECK(VR_TurnStep(nullptr, 0.9f, 0.016f, 0, 45.0f, 150.0f, 0.15f) == 0.0f);
+}
+
+TEST_CASE("smooth turn") {   // speed 150, dz 0.15
+	vr_turn_t t{};
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	CHECK(VR_TurnStep(&t, 1.0f, 0.1f, 1, 45.0f, 150.0f, 0.15f) == doctest::Approx(-15.0f));
+	CHECK(VR_TurnStep(&t, 0.1f, 0.1f, 1, 45.0f, 150.0f, 0.15f) == 0.0f);
+	CHECK(VR_TurnStep(&t, -0.575f, 0.1f, 1, 45.0f, 150.0f, 0.15f) == doctest::Approx(7.5f));
+	CHECK(VR_TurnStep(&t, 1.0f, nan, 1, 45.0f, 150.0f, 0.15f) == 0.0f);
+	CHECK(VR_TurnStep(&t, nan, 0.1f, 1, 45.0f, 150.0f, 0.15f) == 0.0f);
+	CHECK(VR_TurnStep(&t, 1.0f, -0.1f, 1, 45.0f, 150.0f, 0.15f) == 0.0f);
+	CHECK(VR_TurnStep(&t, nan, 0.1f, 0, 45.0f, 150.0f, 0.15f) == 0.0f);   // snap too
 }

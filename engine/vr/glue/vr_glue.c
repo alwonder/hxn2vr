@@ -424,6 +424,7 @@ void VRG_PreInput (void)
 		vrg_body_yaw = VR_BodyYawFromSetAngle (cl.viewangles[YAW], head[YAW]);
 		vrg_body_valid = true;
 	}
+	vrg_body_yaw += VRG_TurnStep ();	/* snap / smooth turn with the main hand's stick */
 	cl.viewangles[PITCH] = 0;
 	cl.viewangles[YAW] = vrg_body_yaw;
 	cl.viewangles[ROLL] = 0;

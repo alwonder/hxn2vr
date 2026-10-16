@@ -102,6 +102,24 @@ typedef struct { int dir; float held, next; } vr_repeat_t;
  * starts the vertical direction. */
 int VR_StickRepeat(vr_repeat_t *r, const float stick[2], float dt);
 
+/* Stick locomotion and turning (pure functions). */
+/* Radial deadzone: |in| <= deadzone gives (0,0), above it the length is rescaled so that deadzone..1 maps
+ * to 0..1 (|out| <= 1, direction kept). Non-finite input gives (0,0); a non-finite or out-of-range deadzone
+ * counts as 0 / 0.99. out may be in. */
+void  VR_StickDeadzone(const float in[2], float deadzone, float out[2]);
+/* World yaw (degrees, not normalized) to move along: mode 0 = body_yaw + head_yaw; mode 1 = body_yaw + yaw
+ * of the hand's aim forward projected on the floor, falling back to the head when !hand_valid, hand_aim
+ * is NULL / not a rotation or the projection is shorter than 0.3 (a pose pointing up or down). */
+float VR_MoveYaw(int mode, const vr_quat_t *hand_aim, int hand_valid, float head_yaw, float body_yaw);
+/* stick (after deadzone: x right, y forward) along move_yaw, expressed in the frame of view_yaw (Quake yaw,
+ * degrees): out[0] forwardmove, out[1] sidemove (> 0 = right), both scaled by speed. */
+void  VR_StickToMove(const float stick[2], float move_yaw, float view_yaw, float speed, float out[2]);
+typedef struct { int fired; } vr_turn_t;
+/* yaw change in degrees (Quake yaw: positive = left, so a stick to the right turns negative). Snap: fires
+ * once (snap_deg) at |x| >= 0.7, re-armed when |x| < 0.3. Smooth: -deadzoned(x) * speed_dps * dt (dt < 0
+ * counts as 0). 0 for non-finite input. */
+float VR_TurnStep(vr_turn_t *t, float stick_x, float dt, int smooth, float snap_deg, float speed_dps, float deadzone);
+
 /* Per frame, after VR_BeginFrame returned render != 0, for eye 0 then 1:
  * VR_BeginEye acquires the eye image, binds its framebuffer and sets the viewport; returns 1 if
  * the eye target is bound (draw into it), 0 if not (do not draw). VR_EndEye mirrors the eye into

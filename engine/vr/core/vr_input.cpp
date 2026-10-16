@@ -147,4 +147,73 @@ int VR_StickRepeat(vr_repeat_t* r, const float stick[2], float dt) {
 	return r->dir;
 }
 
+// Radial deadzone with rescaling (see vr_api.h).
+void VR_StickDeadzone(const float in[2], float deadzone, float out[2]) {
+	if (!out) return;
+	const float x = in ? in[0] : 0.0f, y = in ? in[1] : 0.0f;
+	if (!std::isfinite(x) || !std::isfinite(y)) {
+		out[0] = out[1] = 0.0f;
+		return;
+	}
+	const float dz = std::isfinite(deadzone) ? std::fmin(std::fmax(deadzone, 0.0f), 0.99f) : 0.0f;
+	const float len = std::sqrt(x * x + y * y);
+	if (!(len > dz)) {
+		out[0] = out[1] = 0.0f;
+		return;
+	}
+	const float scaled = std::fmin((len - dz) / (1.0f - dz), 1.0f);
+	out[0] = x / len * scaled;
+	out[1] = y / len * scaled;
+}
+
+float VR_MoveYaw(int mode, const vr_quat_t* hand_aim, int hand_valid, float head_yaw, float body_yaw) {
+	constexpr float kMinProjection = 0.3f;
+	constexpr float kRadToDeg = 57.29577951308232f;
+	if (mode != 1 || !hand_valid || !hand_aim) return body_yaw + head_yaw;
+	const glm::quat q(hand_aim->w, hand_aim->x, hand_aim->y, hand_aim->z);
+	const float n = std::sqrt(q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z);
+	if (!std::isfinite(n) || n < 1e-6f) return body_yaw + head_yaw;
+	const glm::vec3 f = (q / n) * glm::vec3(0.0f, 0.0f, -1.0f);   // aim forward, tracking axes
+	// Quake axes: x = -z, y = -x. Projection on the floor = (x, z) of the tracking vector.
+	if (!(std::sqrt(f.x * f.x + f.z * f.z) >= kMinProjection)) return body_yaw + head_yaw;
+	return body_yaw + std::atan2(-f.x, -f.z) * kRadToDeg;
+}
+
+void VR_StickToMove(const float stick[2], float move_yaw, float view_yaw, float speed, float out[2]) {
+	if (!out) return;
+	const float x = stick ? stick[0] : 0.0f, y = stick ? stick[1] : 0.0f;
+	if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(move_yaw) || !std::isfinite(view_yaw) ||
+	    !std::isfinite(speed)) {
+		out[0] = out[1] = 0.0f;
+		return;
+	}
+	// the stick's frame is rotated by d (counterclockwise) against the view's
+	const double d = static_cast<double>(move_yaw - view_yaw) * 3.14159265358979323846 / 180.0;
+	const double s = std::sin(d), c = std::cos(d);
+	out[0] = static_cast<float>(speed * (y * c + x * s));
+	out[1] = static_cast<float>(speed * (x * c - y * s));
+}
+
+float VR_TurnStep(vr_turn_t* t, float stick_x, float dt, int smooth, float snap_deg, float speed_dps,
+                  float deadzone) {
+	constexpr float kFire = 0.7f;
+	constexpr float kRearm = 0.3f;
+	if (!t || !std::isfinite(stick_x)) return 0.0f;
+	if (smooth) {
+		if (!std::isfinite(dt) || !(dt > 0.0f) || !std::isfinite(speed_dps)) return 0.0f;
+		const float in[2] = {stick_x, 0.0f};
+		float out[2];
+		VR_StickDeadzone(in, deadzone, out);
+		return -out[0] * speed_dps * dt;
+	}
+	const float ax = std::fabs(stick_x);
+	if (t->fired) {
+		if (ax < kRearm) t->fired = 0;
+		return 0.0f;
+	}
+	if (ax < kFire || !std::isfinite(snap_deg)) return 0.0f;
+	t->fired = 1;
+	return stick_x > 0.0f ? -snap_deg : snap_deg;
+}
+
 }  // extern "C"

@@ -10,15 +10,29 @@
 #include "vr_glue_int.h"
 
 cvar_t	vr_mainhand = {"vr_mainhand", "1", CVAR_ARCHIVE};	/* 0 left, 1 right (= VR_HAND_*) */
+cvar_t	vr_movement_mode = {"vr_movement_mode", "1", CVAR_ARCHIVE};	/* 0 head, 1 aim of the off hand */
+cvar_t	vr_turn_mode = {"vr_turn_mode", "0", CVAR_ARCHIVE};		/* 0 snap, 1 smooth */
+cvar_t	vr_snap_angle = {"vr_snap_angle", "45", CVAR_ARCHIVE};		/* degrees */
+cvar_t	vr_turn_speed = {"vr_turn_speed", "150", CVAR_ARCHIVE};	/* degrees per second (smooth) */
+cvar_t	vr_stick_deadzone = {"vr_stick_deadzone", "0.15", CVAR_ARCHIVE};	/* radial */
+
+extern	kbutton_t	in_crouch;	/* cl_input.c (not in client.h) */
 
 static void VRG_BindDefaults_f (void);
 static void VRG_MockHand_f (void);
 static void VRG_MockHead_f (void);
 static void VRG_MockHandsReset (void);
+static void VRG_Where_f (void);
 
 void VRG_InputInit (void)
 {
 	Cvar_RegisterVariable (&vr_mainhand);
+	Cvar_RegisterVariable (&vr_movement_mode);
+	Cvar_RegisterVariable (&vr_turn_mode);
+	Cvar_RegisterVariable (&vr_snap_angle);
+	Cvar_RegisterVariable (&vr_turn_speed);
+	Cvar_RegisterVariable (&vr_stick_deadzone);
+	Cmd_AddCommand ("vr_where", VRG_Where_f);
 	Cmd_AddCommand ("vr_bind_defaults", VRG_BindDefaults_f);
 	Cmd_AddCommand ("vr_mock_hand", VRG_MockHand_f);
 	Cmd_AddCommand ("vr_mock_head", VRG_MockHead_f);
@@ -231,6 +245,79 @@ void VRG_InputFrame (void)
 #undef VRG_INTERRUPTED
 }
 
+/* ---- stick locomotion and turning ---- */
+
+static vr_turn_t	vrg_turn;	/* snap turn state of the main hand's stick */
+
+/* Sticks move and turn only in the running game: not in menus / console / chat, demos, before the
+ * signon is done, or in an intermission. */
+static qboolean VRG_StickGameplay (void)
+{
+	return VR_IsRunning () && Key_GetDest () == key_game && !cls.demoplayback &&
+		cls.signon == SIGNONS && !cl.intermission;
+}
+
+/* Yaw change (degrees) of the main hand's stick for this frame; VRG_PreInput adds it to the body
+ * yaw. The stick state is followed also while a menu is up (a push held when it closes does not
+ * fire a snap turn), but the step only counts in the running game. */
+float VRG_TurnStep (void)
+{
+	vr_hand_t	h;
+	float		step;
+
+	VR_GetHand (VRG_MainHand (), &h);
+	step = VR_TurnStep (&vrg_turn, h.active ? h.stick[0] : 0.0f, (float) host_frametime,
+			vr_turn_mode.integer != 0, vr_snap_angle.value, vr_turn_speed.value,
+			vr_stick_deadzone.value);
+	return VRG_StickGameplay () ? step : 0.0f;
+}
+
+/* CL_BaseMove, after the keyboard terms: the off hand's stick adds to forwardmove / sidemove, along
+ * its aim (vr_movement_mode 1) or the head, in the frame of the view the server moves by. Speed key
+ * and haste are applied by the engine afterwards. */
+void VRG_StickMove (usercmd_t *cmd)
+{
+	vr_hand_t	h;
+	vr_pose_t	head_pose;
+	float		head[3], stick[2], move[2], move_yaw, view_yaw;
+
+	if (!VRG_StickGameplay ())
+		return;
+	VR_GetHand (1 - VRG_MainHand (), &h);
+	if (!h.active)
+		return;
+	VR_StickDeadzone (h.stick, vr_stick_deadzone.value, stick);
+	if (stick[0] == 0.0f && stick[1] == 0.0f)
+		return;
+	VR_GetHeadPose (&head_pose);
+	VR_TrackingToQuakeAngles (&head_pose.rot, head);
+	/* a hand without a valid pose keeps stale poses: VR_MoveYaw falls back to the head */
+	move_yaw = VR_MoveYaw (vr_movement_mode.integer, &h.aim.rot, h.pose_valid, head[YAW], vrg_body_yaw);
+	view_yaw = vrg_body_yaw + head[YAW];
+	VR_StickToMove (stick, move_yaw, view_yaw, 200.0f, move);
+	cmd->forwardmove += move[0];
+	cmd->sidemove += move[1];
+}
+
+/* vr_where: one line with the player's state, for the smoke tests (see the Where scenarios). */
+static void VRG_Where_f (void)
+{
+	const float	*org = cl_entities[cl.viewentity].origin;
+	int		hand, b, held = 0;
+
+	for (hand = 0; hand < 2; hand++)
+	{
+		for (b = 0; b < VRG_NUM_BUTTONS; b++)
+		{
+			if (vrg_in_key[hand][b])
+				held++;
+		}
+	}
+	/* lean (room-scale, Task 2.6) and crouch (Task 2.8) are fixed until those tasks */
+	Con_Printf ("VR: where origin %.1f %.1f %.1f yaw %.1f lean 0 0 view %.1f crouch 0 held %d crouchkey %d\n",
+			org[0], org[1], org[2], vrg_body_yaw, cl.viewheight, held, in_crouch.state & 1);
+}
+
 /* ---- default bindings ---- */
 
 static const struct
@@ -268,6 +355,7 @@ void VRG_InputStart (void)
 	memset (vrg_in_buttons, 0, sizeof(vrg_in_buttons));
 	memset (vrg_in_key, 0, sizeof(vrg_in_key));
 	memset (vrg_in_repeat, 0, sizeof(vrg_in_repeat));
+	memset (&vrg_turn, 0, sizeof(vrg_turn));
 	vrg_in_main = VRG_MainHand ();
 	vrg_in_time = Sys_DoubleTime ();
 	VRG_MockHandsReset ();

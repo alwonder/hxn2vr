@@ -28,6 +28,12 @@
        Menu, stick up, A, A quit as in g. -ExpectQuit, WaitLines 3: a dialog that the controller cannot
        answer hangs until the timeout; a wrong "yes" opens the class menu and the quit path fails.
 
+    f  map demo1, mock controller only -> stick locomotion and snap turning: `vr_where` (A), the left (off-hand)
+       stick pushed forward for ~2 s, `vr_where` (B), the right (main-hand) stick pushed to the right and
+       released, `vr_where` (C). The three `VR: where ...` lines must show A -> B more than 32 units apart
+       on the floor plane (the mock's left aim is the identity, so the move follows the body yaw) and a
+       yaw change B -> C of -45 (315 mod 360, +-1: one snap turn to the right, once per push).
+
   check_shot --stereo alone cannot prove VR ran, so every run also uses -condebug and the
   console log must contain `VR: started (mock)` and no `VR:` error line (`VR: recentered` is allowed;
   scenario a requires it: the auto-recenter on the first rendered frame; `VR: default controller
@@ -49,7 +55,7 @@
 [CmdletBinding()]
 param(
     [string]$Exe = 'build/win64/Debug/hxn2vr.exe',
-    [string[]]$Scenarios = @('a', 'b', 'c', 'd', 'e', 'g', 'm'),
+    [string[]]$Scenarios = @('a', 'b', 'c', 'd', 'e', 'f', 'g', 'm'),
     [string]$GameDir = 'build/game',
     [switch]$IncludePending,
     [int]$TimeoutSec = 180,
@@ -87,6 +93,19 @@ $all = [ordered]@{
     d = @{ Commands = @('map demo1', 'vid_restart'); Stereo = $true; Pending = $false; Restarts = 1 }
     # no headset: the OpenXR session cannot start, the game falls back to the flat view
     e = @{ Commands = @('map demo1', 'vr_enabled', 'vr_status'); Backend = 'openxr'; Fallback = $true; Pending = $false }
+    # stick locomotion and snap turn (see the header): the vr_where lines A, B, C are checked in Test-VrLog
+    f = @{ Commands = @(
+            'map demo1', ((@('wait') * 150) -join '; '),             # the level is in
+            'menu_main; togglemenu',                                   # no menu, whatever the start did
+            'vr_where',                                                # A
+            ('vr_mock_hand left sy 1; ' + ((@('wait') * 150) -join '; ')),   # ~2 s forward ...
+            'vr_mock_hand left sy 0',                                  # ... then stop
+            ((@('wait') * 20) -join '; '),
+            'vr_where',                                                # B
+            ('vr_mock_hand right sx 1; ' + ((@('wait') * 20) -join '; ')),   # one snap turn to the right
+            ('vr_mock_hand right sx 0; ' + ((@('wait') * 20) -join '; ')),
+            'vr_where');                                               # C
+        Stereo = $true; Where = $true; WaitLines = 3; Pending = $false }
     # quit from the controller in the main menu (no map). The first line runs before VR starts (same
     # command buffer pass as +vr_enabled 1); the mock commands run once it is up. Hexen.rc opens the
     # main menu at startup (menu_main): `menu_main; togglemenu` closes it whatever Hexen.rc did, so
@@ -142,9 +161,26 @@ function Test-VrLog([string]$path, $sc) {
     }
     if ($sc.Recenter -and -not ($vrLines -ccontains 'VR: recentered')) { return "log has no 'VR: recentered' line (auto-recenter did not run)" }
     if ($sc.Bindings -and -not ($vrLines -ccontains 'VR: default controller bindings set')) { return "log has no 'VR: default controller bindings set' line" }
-    # Expected VR: lines are the start/stop/recenter/default-bindings notices; anything else is an error report.
+    if ($sc.Where) {
+        $re = '^VR: where origin (\S+) (\S+) (\S+) yaw (\S+) lean (\S+) (\S+) view (\S+) crouch (\d) held (\d+) crouchkey (\d)$'
+        $w = @($vrLines | Where-Object { $_ -cmatch $re })
+        if ($w.Count -ne 3) { return "expected 3 'VR: where' lines (A, B, C), found $($w.Count): $($w -join ' | ')" }
+        $p = @()
+        foreach ($l in $w) {
+            [void]($l -cmatch $re)
+            $p += ,@{ X = [double]::Parse($Matches[1], [cultureinfo]::InvariantCulture); Y = [double]::Parse($Matches[2], [cultureinfo]::InvariantCulture)
+                      Yaw = [double]::Parse($Matches[4], [cultureinfo]::InvariantCulture); Held = [int]$Matches[9]; CrouchKey = [int]$Matches[10] }
+        }
+        $dist = [math]::Sqrt([math]::Pow($p[1].X - $p[0].X, 2) + [math]::Pow($p[1].Y - $p[0].Y, 2))
+        Write-Host ("vr-mock-smoke: stick move A->B {0:N1} units, turn B->C {1:N1} deg" -f $dist, ((($p[2].Yaw - $p[1].Yaw) % 360 + 360) % 360))
+        if ($dist -le 32) { return "the left stick moved the player only $dist units (A -> B), expected more than 32: $($w -join ' | ')" }
+        $turn = (($p[2].Yaw - $p[1].Yaw) % 360 + 360) % 360
+        if ([math]::Abs($turn - 315) -gt 1) { return "snap turn B -> C changed the yaw by $turn (mod 360), expected 315 +- 1: $($w -join ' | ')" }
+        if ($p[2].Held -ne 0 -or $p[2].CrouchKey -ne 0) { return "buttons stuck after the sticks: $($w[2])" }
+    }
+    # Expected VR: lines are the start/stop/recenter/default-bindings notices (and vr_where output); anything else is an error report.
     $bad = @($vrLines | Where-Object { $_ -cne 'VR: started (mock)' -and $_ -cne 'VR: stopped' -and $_ -cne 'VR: recentered' -and
-        $_ -cne 'VR: default controller bindings set' })
+        $_ -cne 'VR: default controller bindings set' -and $_ -cnotmatch '^VR: where ' })
     if ($bad.Count) { return "log has VR error line(s): $($bad -join ' | ')" }
     return $null
 }
@@ -152,7 +188,7 @@ function Test-VrLog([string]$path, $sc) {
 $failed = @()
 $results = @()
 foreach ($s in $Scenarios) {
-    if (-not $all.Contains($s)) { throw "unknown scenario '$s' (a, b, c, d, e, g, m)" }
+    if (-not $all.Contains($s)) { throw "unknown scenario '$s' (a, b, c, d, e, f, g, m)" }
     $sc = $all[$s]
     if ($sc.Pending -and -not $IncludePending) {
         Write-Host "vr-mock-smoke ($s): PENDING (skipped; -IncludePending to run)"

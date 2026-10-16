@@ -20,6 +20,11 @@ extern	cvar_t	vr_mock_motion;
 extern	cvar_t	vr_mock_hz;
 extern	cvar_t	vr_debug_ticks;
 extern	cvar_t	vr_mainhand;		/* vr_glue_input.c: 0 left, 1 right (= VR_HAND_*) */
+extern	cvar_t	vr_movement_mode;	/* 0 head, 1 aim of the off hand */
+extern	cvar_t	vr_turn_mode;		/* 0 snap, 1 smooth */
+extern	cvar_t	vr_snap_angle;
+extern	cvar_t	vr_turn_speed;
+extern	cvar_t	vr_stick_deadzone;
 
 void VRG_Init (void);		/* Host_Init, before config.cfg/hexen.rc are executed: registers cvars */
 void VRG_Shutdown (void);	/* Host_Shutdown: stops the module if running */
@@ -53,6 +58,7 @@ void VRG_EyeFrustum (float normals[4][3]);	/* R_SetFrustum in an eye pass: left,
 
 /* View angles (CL_SendCmd / cl_parse): all no-ops while VR is not running. */
 void VRG_PreInput (void);	/* before CL_BaseMove: cl.viewangles = {0, body_yaw, 0} */
+void VRG_StickMove (usercmd_t *cmd);	/* CL_BaseMove, after the keyboard terms: the off hand's stick adds to the move */
 void VRG_PostInput (void);	/* after IN_Move: body_yaw = cl.viewangles[YAW]; cl.viewangles = body + head */
 void VRG_OnSetAngle (void);	/* after svc_setangle(_interpolate): body_yaw = server yaw - head yaw */
 
