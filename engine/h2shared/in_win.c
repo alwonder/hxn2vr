@@ -33,6 +33,7 @@
 #include "quakedef.h"
 #include "winquake.h"
 #include <mmsystem.h>
+#include "vr_glue.h"	/* HXVR */
 
 #define DIRECTINPUT_VERSION 0x0300
 #include <dinput.h>
@@ -823,7 +824,7 @@ void IN_Move (usercmd_t *cmd)
 		return;
 	}
 
-	if (ActiveApp && !Minimized)
+	if ((ActiveApp && !Minimized) || VRG_SimActive ())	/* HXVR: the joystick also works unfocused in VR (the mouse is released then: no-op) */
 	{
 		IN_MouseMove (cmd);
 		IN_JoyMove (cmd);

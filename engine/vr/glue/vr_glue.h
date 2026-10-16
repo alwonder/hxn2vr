@@ -36,9 +36,10 @@ int VRG_ServerTicks (double dt);
 
 /* SCR_UpdateScreen, after SCR_SetUpToDrawConsole: the VR path. If this host frame's VR frame is
  * rendering, renders both eyes, mirrors them into the window (vr_mirror), ends the VR frame and
- * presents the window; returns true (the flat path is skipped). Otherwise (VR off, frame not
- * rendering, or this frame's VR frame already submitted) ends a pending non-rendering frame and
- * returns false: the flat path draws the window. */
+ * presents the window; returns true (the flat path is skipped). Later calls in the same host frame
+ * (the VR frame is already submitted and the window presented) also return true and draw nothing.
+ * Otherwise (VR off, or this host frame's VR frame is not rendering) ends a pending non-rendering
+ * frame and returns false: the flat path draws the window. */
 qboolean VRG_UpdateScreen (void);
 qboolean VRG_EyeActive (void);	/* true while an eye's R_RenderView runs */
 void VRG_SetupEyeGL (void);	/* R_SetupGL in an eye pass: eye viewport + eye projection */
@@ -48,5 +49,9 @@ void VRG_EyeFrustum (float normals[4][3]);	/* R_SetFrustum in an eye pass: left,
 void VRG_PreInput (void);	/* before CL_BaseMove: cl.viewangles = {0, body_yaw, 0} */
 void VRG_PostInput (void);	/* after IN_Move: body_yaw = cl.viewangles[YAW]; cl.viewangles = body + head */
 void VRG_OnSetAngle (void);	/* after svc_setangle(_interpolate): body_yaw = server yaw - head yaw */
+
+/* Implemented by the video driver (gl_vidnt.c): blocks sound while the window is unfocused, except
+ * while a VR session runs. The glue calls it when VR starts / stops. */
+void VID_VRSoundFocus (void);
 
 #endif /* HXVR_VR_GLUE_H */

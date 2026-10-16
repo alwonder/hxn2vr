@@ -224,6 +224,9 @@ static qboolean S_DS_Init (dma_t *dma)
 		memset (&dsbuf, 0, sizeof(dsbuf));
 		dsbuf.dwSize = sizeof(DSBUFFERDESC);
 		dsbuf.dwFlags = DSBCAPS_CTRLFREQUENCY | DSBCAPS_LOCSOFTWARE;
+		/* HXVR: keep playing while the window is unfocused (it usually is in VR); without VR,
+		 * AppActivate still blocks sound on focus loss (S_BlockSound: buffer cleared, not painted) */
+		dsbuf.dwFlags |= DSBCAPS_GLOBALFOCUS;
 		if (ds_sbuf_size < DSBSIZE_MIN)
 			ds_sbuf_size = 1 << (Q_log2(DSBSIZE_MIN) + 1);
 		if (ds_sbuf_size > DSBSIZE_MAX)

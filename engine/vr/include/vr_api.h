@@ -33,7 +33,10 @@ typedef struct {
 	float mock_hz;
 } vr_start_params_t;
 
-typedef struct { int render; int focused; int lost; } vr_frame_t;
+/* recenter: the runtime moved the tracking origin (OpenXR: reference space change, or the session
+ * began again after it stopped -- headset off/on) since the previous VR_BeginFrame; the caller re-arms
+ * its automatic recenter (done on the next frame with render != 0). Never set by the mock. */
+typedef struct { int render; int focused; int lost; int recenter; } vr_frame_t;
 typedef struct { double acc; } vr_simclock_t;
 
 /* Snapshot for the vr_status command. All strings are NUL-terminated and empty when not applicable.

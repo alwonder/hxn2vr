@@ -14,7 +14,8 @@ struct GlExt;   // GL entry points (gl_ext.hpp). Backends keep the pointer; it m
 
 struct Pose { glm::vec3 pos; glm::quat rot; };   // metres, OpenXR axes, relative to the floor
 struct Fov { float left, right, up, down; };      // radians, left/down < 0
-struct FrameInfo { bool render; bool focused; bool lost; };
+// recenter: the tracking origin moved since the previous beginFrame (vr_frame_t::recenter).
+struct FrameInfo { bool render; bool focused; bool lost; bool recenter = false; };
 struct StartParams { float renderScale; float eyeHeightM; bool mockMotion; float mockHz; };
 // Human-readable facts about the running backend, for vr_status. Plain strings; empty = not applicable.
 struct BackendInfo {
@@ -72,7 +73,10 @@ std::unique_ptr<Backend> makeMockBackend(const GlExt*);
 // engine thread. GlExt must be non-null, or start() fails. FrameInfo: render = shouldRender &&
 // session running && poses valid; focused = session FOCUSED; lost = LOSS_PENDING / EXITING /
 // instance loss / failed frame calls / the current GL context is not the one the session was
-// created with (then no XR or GL call is made; stop() and a new start() are needed). While the
+// created with (then no XR or GL call is made; stop() and a new start() are needed); recenter = on
+// the first begun frame displayed at/after a REFERENCE_SPACE_CHANGE_PENDING of the app space's type
+// (STAGE / LOCAL), and on the first begun frame after the session began again after STOPPING
+// (headset off/on). The mock never reports recenter. While the
 // session is not running (IDLE) beginFrame sleeps ~10 ms instead of calling xrWaitFrame.
 std::unique_ptr<Backend> makeOpenXrBackend(const GlExt*, void (*print)(const char*));
 

@@ -1,4 +1,4 @@
-// Lifecycle: failed start, lost session, restart after stop, vr_status data.
+// Lifecycle: failed start, lost session, restart after stop, recenter requests, vr_status data.
 #include "doctest.h"
 #include "backend.hpp"
 #include "vr_api.h"
@@ -23,13 +23,15 @@ vr_start_params_t params(vr_backend_kind_t kind) {
 }
 
 struct Counters {
-	int starts = 0, stops = 0, begins = 0, ends = 0;
+	int starts = 0, stops = 0, begins = 0, ends = 0, acquires = 0, releases = 0;
 };
 
-// Configurable fake: start result, lost from the Nth beginFrame on, canned info().
+// Configurable fake: start result, lost from the Nth beginFrame on, a recenter request on the Mth
+// beginFrame, canned info().
 class ScriptedBackend final : public hxvr::Backend {
 public:
-	ScriptedBackend(Counters *c, bool startOk, int lostAtFrame = 0) : c_(c), startOk_(startOk), lostAt_(lostAtFrame) {}
+	ScriptedBackend(Counters *c, bool startOk, int lostAtFrame = 0, int recenterAtFrame = 0)
+	    : c_(c), startOk_(startOk), lostAt_(lostAtFrame), recenterAt_(recenterAtFrame) {}
 	bool start(const hxvr::StartParams &, std::string &err) override {
 		++c_->starts;
 		if (!startOk_) err = "no runtime";
@@ -39,14 +41,17 @@ public:
 	hxvr::FrameInfo beginFrame(double) override {
 		++c_->begins;
 		const bool lost = lostAt_ > 0 && c_->begins >= lostAt_;
-		return hxvr::FrameInfo{!lost, !lost, lost};
+		return hxvr::FrameInfo{!lost, !lost, lost, c_->begins == recenterAt_};
 	}
 	hxvr::Pose headPose() const override { return hxvr::Pose{glm::vec3(0.0f), glm::quat(1, 0, 0, 0)}; }
 	hxvr::Pose eyePose(int) const override { return headPose(); }
 	hxvr::Fov eyeFov(int) const override { return hxvr::Fov{-0.7f, 0.7f, 0.7f, -0.7f}; }
 	glm::ivec2 eyeSize() const override { return glm::ivec2(800, 900); }
-	unsigned acquireEye(int) override { return 0; }
-	void releaseEye(int) override {}
+	unsigned acquireEye(int) override {
+		++c_->acquires;
+		return 0;
+	}
+	void releaseEye(int) override { ++c_->releases; }
 	void endFrame() override { ++c_->ends; }
 	hxvr::BackendInfo info() const override {
 		return hxvr::BackendInfo{"fake", "visible", "FakeRuntime 1.2.3", "0x8C43 (sRGB)"};
@@ -56,6 +61,7 @@ private:
 	Counters *c_;
 	bool startOk_;
 	int lostAt_;
+	int recenterAt_;
 };
 
 int g_prints = 0;
@@ -144,15 +150,69 @@ TEST_CASE("lost session: the second frame reports lost, stop and restart are cle
 }
 
 TEST_CASE("TestInjectBackend after a stop leaves no stale per-session state") {
-	Counters c;
-	VR_TestInjectBackend(std::make_unique<ScriptedBackend>(&c, true));
+	Counters c1, c2;
+	VR_TestInjectBackend(std::make_unique<ScriptedBackend>(&c1, true));
 	vr_frame_t f{};
 	REQUIRE(VR_BeginFrame(&f) == 1);
-	VR_BeginEye(0);   // acquired, never released (like a longjmp out of the frame)
-	VR_TestInjectBackend(std::make_unique<ScriptedBackend>(&c, true));
+	CHECK(VR_BeginEye(0) == 0);   // no texture (fake): acquired but not bound
+	CHECK(c1.acquires == 1);
+	// acquired, never released (like a longjmp out of the frame): the next inject stops the first
+	// backend, which releases the eye and ends the frame before stop()
+	VR_TestInjectBackend(std::make_unique<ScriptedBackend>(&c2, true));
+	CHECK(c1.releases == 1);
+	CHECK(c1.ends == c1.begins);
+	CHECK(c1.stops == 1);
+
 	REQUIRE(VR_BeginFrame(&f) == 1);
-	CHECK(VR_BeginEye(0) == 0);   // fresh session: the eye was not left "acquired", it is acquired again
-	VR_EndEye(0, 0, 64, 64);      // would be a no-op if the stale flag survived
+	CHECK(VR_BeginEye(0) == 0);
+	CHECK(c2.acquires == 1);      // fresh session: the eye was not left "acquired", it is acquired again
+	VR_EndEye(0, 0, 64, 64);
+	CHECK(c2.releases == 1);      // released by VR_EndEye (a stale flag would make both calls no-ops)
+	VR_Stop();
+	CHECK(c2.releases == 1);      // nothing left to release at stop
+	CHECK(c2.ends == c2.begins);
+	CHECK(c2.stops == 1);
+	CHECK(c1.acquires == 1);      // the first backend was not touched after its stop
+	CHECK(c1.releases == 1);
+}
+
+TEST_CASE("recenter request: passed through VR_BeginFrame for exactly the frame that reports it") {
+	FactoryGuard guard;
+	Counters c;
+	VR_TestSetBackendFactory([&](vr_backend_kind_t) -> std::unique_ptr<hxvr::Backend> {
+		return std::make_unique<ScriptedBackend>(&c, true, 0, 3);   // recenter on the 3rd frame
+	});
+	char err[64];
+	const vr_start_params_t p = params(VR_BACKEND_OPENXR);
+	REQUIRE(VR_Start(nullptr, &p, err, sizeof err) == 1);
+	vr_frame_t f;
+	int recenters[5] = {};
+	for (int i = 0; i < 5; ++i) {
+		std::memset(&f, 0x7f, sizeof f);   // every field is written, also recenter = 0
+		REQUIRE(VR_BeginFrame(&f) == 1);
+		recenters[i] = f.recenter;
+		CHECK(f.render == 1);
+	}
+	CHECK(recenters[0] == 0);
+	CHECK(recenters[1] == 0);
+	CHECK(recenters[2] == 1);
+	CHECK(recenters[3] == 0);
+	CHECK(recenters[4] == 0);
+	VR_Stop();
+	std::memset(&f, 0x7f, sizeof f);
+	CHECK(VR_BeginFrame(&f) == 0);   // stopped: cleared, no request
+	CHECK(f.recenter == 0);
+}
+
+TEST_CASE("the mock never requests a recenter") {
+	const vr_start_params_t p = params(VR_BACKEND_MOCK);
+	char err[64];
+	REQUIRE(VR_Start(nullptr, &p, err, sizeof err) == 1);
+	vr_frame_t f{};
+	for (int i = 0; i < 10; ++i) {
+		REQUIRE(VR_BeginFrame(&f) == 1);
+		CHECK(f.recenter == 0);
+	}
 	VR_Stop();
 }
 

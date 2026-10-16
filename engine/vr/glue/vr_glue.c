@@ -56,7 +56,8 @@ static qboolean		vrg_frame_pending;	/* VR_BeginFrame done, VR_EndFrame not yet *
 static float		vrg_body_yaw;
 static qboolean		vrg_body_valid;		/* body_yaw taken from cl.viewangles since VR started */
 static vr_vec3_t	vrg_anchor;
-static qboolean		vrg_recenter_pending;	/* auto-recenter on the first rendered frame after VR starts */
+static qboolean		vrg_recenter_pending;	/* auto-recenter on the first rendered frame after VR starts
+						 * or after the backend reported vr_frame_t.recenter */
 
 /* current eye pass (VRG_UpdateScreen) */
 static qboolean		vrg_eye_active;
@@ -91,6 +92,10 @@ static float		vrg_ticks_per_s;
 
 /* VR was running when the video mode was being changed (vid_restart): start it again afterwards */
 static qboolean		vrg_restart_wanted;
+
+/* vr_eye_height (metres) and vr_world_scale in use (VRG_CheckScaleCvars): the last valid values */
+static float		vrg_eye_height = 1.65f, vrg_world_scale = 1.0f;
+static qboolean		vrg_eye_height_warned, vrg_world_scale_warned;
 
 /* Module messages can arrive mid-frame (e.g. from VR_BeginEye): Con_Printf may re-enter
  * SCR_UpdateScreen while cls.signon != SIGNONS, so only safe prints here. */
@@ -150,6 +155,32 @@ static void VRG_RestoreSwapInterval (void)
 		set (vrg_swap_interval);
 }
 
+/* An invalid vr_eye_height / vr_world_scale (<= 0, NaN, infinite or absurdly large) would give a
+ * zero, mirrored or non-finite units-per-metre: it is ignored, the last valid value stays in use and
+ * one warning is printed (again only after a valid value was set in between). Safe print: runs
+ * mid-frame. */
+static void VRG_CheckScaleCvar (cvar_t *var, float *inuse, qboolean *warned)
+{
+	const float	v = var->value;
+
+	if (v > 0.0f && v <= 1000.0f)	/* false for NaN */
+	{
+		*inuse = v;
+		*warned = false;
+	}
+	else if (!*warned)
+	{
+		Con_SafePrintf ("VR: invalid %s \"%s\" ignored, using %g\n", var->name, var->string, *inuse);
+		*warned = true;
+	}
+}
+
+static void VRG_CheckScaleCvars (void)
+{
+	VRG_CheckScaleCvar (&vr_eye_height, &vrg_eye_height, &vrg_eye_height_warned);
+	VRG_CheckScaleCvar (&vr_world_scale, &vrg_world_scale, &vrg_world_scale_warned);
+}
+
 static void VRG_EndFrame (void)
 {
 	vrg_eye_active = false;
@@ -188,7 +219,8 @@ static void VRG_Start (void)
 		bname = "openxr";
 	}
 	p.render_scale = vr_render_scale.value;
-	p.eye_height_m = vr_eye_height.value;
+	VRG_CheckScaleCvars ();
+	p.eye_height_m = vrg_eye_height;
 	p.mock_motion = vr_mock_motion.integer;
 	p.mock_hz = vr_mock_hz.value;
 
@@ -217,6 +249,7 @@ static void VRG_Start (void)
 	vrg_ticks_per_s = 0;
 	vrg_frame_pending = false;
 	VRG_SaveSwapInterval ();
+	VID_VRSoundFocus ();	/* sound plays while VR runs, also with the desktop window unfocused */
 	Con_Printf ("VR: started (%s)\n", bname);
 }
 
@@ -227,6 +260,7 @@ static void VRG_Stop (void)
 	VRG_RestoreSwapInterval ();
 	vrg_active = false;
 	memset (&vrg_frame, 0, sizeof(vrg_frame));
+	VID_VRSoundFocus ();	/* back to the flat rule: no sound while the window is unfocused */
 	Con_Printf ("VR: stopped\n");
 }
 
@@ -273,6 +307,8 @@ qboolean VRG_HostFrameBegin (void)
 		}
 		vrg_frame_pending = true;
 		vrg_active = (vrg_frame.render != 0);
+		if (vrg_frame.recenter)
+			vrg_recenter_pending = true;	/* the runtime moved the tracking origin (headset off/on...) */
 		if (vrg_active && vrg_recenter_pending)
 		{
 			/* the tracking origin is the stage centre, not where the player stands */
@@ -460,7 +496,7 @@ static void VRG_PanelPlace (qboolean world, const vec3_t feet, float body_yaw, f
 		vr_vec3_t	eye;
 
 		eye.x = vrg_anchor.x;
-		eye.y = vr_eye_height.value;
+		eye.y = vrg_eye_height;
 		eye.z = vrg_anchor.z;
 		VR_EyeOrigin (feet, body_yaw, &eye, &vrg_anchor, upm, center);
 		yaw = body_yaw;
@@ -558,7 +594,8 @@ qboolean VRG_UpdateScreen (void)
 	if (vrg_in_update)
 		return true;	/* re-entered (Con_Printf during signon) while this frame is being drawn */
 	if (!vrg_frame_pending)
-		return false;	/* VR off, or this host frame's VR frame was already submitted */
+		return vrg_active;	/* VR off or not rendering (false: flat path); or this host frame's VR
+					 * frame was already submitted and the window presented (true: draw nothing) */
 	if (!vrg_active)
 	{
 		VRG_EndFrame ();	/* not rendering: the window takes the flat path */
@@ -569,7 +606,8 @@ qboolean VRG_UpdateScreen (void)
 	world = (cls.state == ca_connected && cl.worldmodel && !con_forcedup);
 	VectorClear (feet);
 	body_yaw = vrg_body_yaw;
-	upm = VR_UnitsPerMetre (vr_eye_height.value, vr_world_scale.value);
+	VRG_CheckScaleCvars ();
+	upm = VR_UnitsPerMetre (vrg_eye_height, vrg_world_scale);
 	if (world)
 	{
 		V_SetupRefdef ();

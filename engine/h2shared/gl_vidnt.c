@@ -1483,6 +1483,28 @@ static void VID_UpdateWindowStatus (void)
 }
 
 
+/* HXVR: sound_active was static in AppActivate. Sound plays while the window is focused (upstream)
+ * or while a VR session runs: the desktop window is usually unfocused in VR. Called by AppActivate
+ * on focus changes and by the VR glue when VR starts / stops. */
+static BOOL	sound_active;
+
+void VID_VRSoundFocus (void)
+{
+	const qboolean	want = ActiveApp || VRG_SimActive ();
+
+	if (!want && sound_active)
+	{
+		S_BlockSound ();
+		sound_active = false;
+	}
+	else if (want && !sound_active)
+	{
+		S_UnblockSound ();
+		sound_active = true;
+	}
+}
+/* HXVR end */
+
 static void AppActivate (BOOL fActive, BOOL minimize)
 /****************************************************************************
 *
@@ -1495,22 +1517,11 @@ static void AppActivate (BOOL fActive, BOOL minimize)
 *
 ****************************************************************************/
 {
-	static BOOL	sound_active;
-
 	ActiveApp = fActive;
 	Minimized = minimize;
 
 // enable/disable sound on focus gain/loss
-	if (!ActiveApp && sound_active)
-	{
-		S_BlockSound ();
-		sound_active = false;
-	}
-	else if (ActiveApp && !sound_active)
-	{
-		S_UnblockSound ();
-		sound_active = true;
-	}
+	VID_VRSoundFocus ();	/* HXVR: the upstream rule, but sound stays on while a VR session runs */
 
 	if (fActive)
 	{
@@ -2109,7 +2120,6 @@ static void VID_ChangeVideoMode (int newmode)
 		SetDeviceGammaRamp_f(maindc, orig_ramps);
 	/* HXVR: VR objects live in the GL context deleted below: stop VR while it is still current */
 	VRG_BeforeVideoRestart ();
-
 	CDAudio_Pause ();
 	BGM_Pause ();
 	S_ClearBuffer ();

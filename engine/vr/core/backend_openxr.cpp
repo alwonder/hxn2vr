@@ -166,14 +166,14 @@ public:
 
 		XrFrameWaitInfo wi{XR_TYPE_FRAME_WAIT_INFO};
 		XrFrameState fs{XR_TYPE_FRAME_STATE};
-		XrResult r = call("xrWaitFrame", [&] { return xrWaitFrame(sess_, &wi, &fs); });
+		XrResult r = callGl("xrWaitFrame", [&] { return xrWaitFrame(sess_, &wi, &fs); });
 		if (XR_FAILED(r)) {
 			markLost("xrWaitFrame failed");
 			fi.lost = true;
 			return fi;
 		}
 		XrFrameBeginInfo bi{XR_TYPE_FRAME_BEGIN_INFO};
-		r = call("xrBeginFrame", [&] { return xrBeginFrame(sess_, &bi); });
+		r = callGl("xrBeginFrame", [&] { return xrBeginFrame(sess_, &bi); });
 		if (XR_FAILED(r)) {
 			markLost("xrBeginFrame failed");
 			fi.lost = true;
@@ -181,6 +181,10 @@ public:
 		}
 		frameBegun_ = true;
 		displayTime_ = fs.predictedDisplayTime;
+		if (recenterPending_ && displayTime_ >= recenterAt_) {   // poses of this frame are in the changed space
+			recenterPending_ = false;
+			fi.recenter = true;
+		}
 		// render => the views AND the head pose were located with valid orientation and position.
 		renderFrame_ = st.render && fs.shouldRender && locate(displayTime_);
 		fi.render = renderFrame_;
@@ -334,6 +338,19 @@ private:
 		return r;
 	}
 
+	// Same, for XR calls in which the runtime may use GL in our context (frame and session calls,
+	// session/swapchain creation and destruction): the engine's texture and framebuffer bindings
+	// are saved before and restored after (only while our context is current).
+	template <class F>
+	XrResult callGl(const char* what, F&& f, bool log = true) {
+		const bool guard = gl_ && contextOk();
+		GlBindings saved;
+		if (guard) saved = saveBindings();
+		const XrResult r = call(what, std::forward<F>(f), log);
+		if (guard) restoreBindings(saved);
+		return r;
+	}
+
 	// Same, for start(): the failure goes into `err` (VR_Start reports it), not the console.
 	template <class F>
 	bool callOrFail(const char* what, F&& f, std::string& err, const char* hint = nullptr) {
@@ -358,6 +375,13 @@ private:
 		if (now.tex != b.tex) gl_->glBindTexture(gl::kTexture2D, static_cast<gl::GLuint>(b.tex));
 		if (now.drawFbo != b.drawFbo) gl_->glBindFramebuffer(gl::kDrawFramebuffer, static_cast<gl::GLuint>(b.drawFbo));
 		if (now.readFbo != b.readFbo) gl_->glBindFramebuffer(gl::kReadFramebuffer, static_cast<gl::GLuint>(b.readFbo));
+	}
+
+	// Asks the glue to recenter on the first frame displayed at or after `at` (0 = the next frame);
+	// with a request already pending the later time wins.
+	void requestRecenter(XrTime at) {
+		recenterAt_ = recenterPending_ ? std::max(recenterAt_, at) : at;
+		recenterPending_ = true;
 	}
 
 	void markLost(const std::string& why) {
@@ -531,7 +555,7 @@ private:
 		XrSessionCreateInfo sci{XR_TYPE_SESSION_CREATE_INFO};
 		sci.next = &gb;
 		sci.systemId = sys_;
-		const XrResult r = call("xrCreateSession", [&] { return xrCreateSession(inst_, &sci, &sess_); }, false);
+		const XrResult r = callGl("xrCreateSession", [&] { return xrCreateSession(inst_, &sci, &sess_); }, false);
 		if (XR_SUCCEEDED(r)) return true;
 		sess_ = XR_NULL_HANDLE;
 		err = "OpenXR: xrCreateSession failed: " + resultStr(r);
@@ -551,6 +575,7 @@ private:
 			return false;
 		types.resize(n);
 		const bool stage = std::find(types.begin(), types.end(), XR_REFERENCE_SPACE_TYPE_STAGE) != types.end();
+		appSpaceType_ = stage ? XR_REFERENCE_SPACE_TYPE_STAGE : XR_REFERENCE_SPACE_TYPE_LOCAL;
 
 		// Poses are floor-relative: STAGE has its origin on the floor. LOCAL's origin is at the
 		// initial head position, so the app space is LOCAL shifted down by the eye height.
@@ -665,12 +690,15 @@ private:
 				break;
 			case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING: {
 				const auto* e = reinterpret_cast<const XrEventDataReferenceSpaceChangePending*>(&ev);
-				if (e->session == sess_)
+				if (e->session == sess_) {
 					say(std::string("OpenXR reference space change pending (") +
 					    (e->referenceSpaceType == XR_REFERENCE_SPACE_TYPE_STAGE   ? "STAGE"
 					     : e->referenceSpaceType == XR_REFERENCE_SPACE_TYPE_LOCAL ? "LOCAL"
 					                                                              : "other") +
 					    "): the tracking origin moved");
+					// the app space is based on STAGE or LOCAL: recenter once the change is in effect
+					if (e->referenceSpaceType == appSpaceType_) requestRecenter(e->changeTime);
+				}
 				break;
 			}
 			case XR_TYPE_EVENT_DATA_EVENTS_LOST:
@@ -690,12 +718,19 @@ private:
 		if (st.beginSession && !running_) {
 			XrSessionBeginInfo bi{XR_TYPE_SESSION_BEGIN_INFO};
 			bi.primaryViewConfigurationType = kViewConfig;
-			if (XR_SUCCEEDED(call("xrBeginSession", [&] { return xrBeginSession(sess_, &bi); }))) running_ = true;
-			else markLost("xrBeginSession failed");
+			if (XR_SUCCEEDED(callGl("xrBeginSession", [&] { return xrBeginSession(sess_, &bi); }))) {
+				running_ = true;
+				// READY again after STOPPING (headset off/on): the player may stand elsewhere now.
+				// The first begin needs no request: the glue recenters on the first rendered frame.
+				if (sessionEnded_) requestRecenter(0);
+			} else {
+				markLost("xrBeginSession failed");
+			}
 		}
 		if (st.endSession && running_) {
-			call("xrEndSession", [&] { return xrEndSession(sess_); });
+			callGl("xrEndSession", [&] { return xrEndSession(sess_); });
 			running_ = false;
+			sessionEnded_ = true;
 		}
 		if (st.lost) markLost(s == XR_SESSION_STATE_EXITING ? "OpenXR session exiting" : "OpenXR session lost");
 	}
@@ -757,7 +792,7 @@ private:
 			}
 		}
 		if (running_ && !lost_) {   // STOPPING never came: end anyway (destroy follows)
-			if (contextOk()) call("xrEndSession", [&] { return xrEndSession(sess_); });
+			if (contextOk()) callGl("xrEndSession", [&] { return xrEndSession(sess_); });
 		}
 		running_ = false;
 	}
@@ -765,13 +800,13 @@ private:
 	bool emptyFrame() {
 		XrFrameWaitInfo wi{XR_TYPE_FRAME_WAIT_INFO};
 		XrFrameState fs{XR_TYPE_FRAME_STATE};
-		if (XR_FAILED(call("xrWaitFrame", [&] { return xrWaitFrame(sess_, &wi, &fs); }))) return false;
+		if (XR_FAILED(callGl("xrWaitFrame", [&] { return xrWaitFrame(sess_, &wi, &fs); }))) return false;
 		XrFrameBeginInfo bi{XR_TYPE_FRAME_BEGIN_INFO};
-		if (XR_FAILED(call("xrBeginFrame", [&] { return xrBeginFrame(sess_, &bi); }))) return false;
+		if (XR_FAILED(callGl("xrBeginFrame", [&] { return xrBeginFrame(sess_, &bi); }))) return false;
 		XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO};
 		ei.displayTime = fs.predictedDisplayTime;
 		ei.environmentBlendMode = blend_;
-		return XR_SUCCEEDED(call("xrEndFrame", [&] { return xrEndFrame(sess_, &ei); }));
+		return XR_SUCCEEDED(callGl("xrEndFrame", [&] { return xrEndFrame(sess_, &ei); }));
 	}
 
 	// Destroys every handle (instance last). Safe on a partial start. If another GL context is
@@ -783,12 +818,12 @@ private:
 		const bool foreign = curRc && curRc != rc_;
 		if (foreign) wglMakeCurrent(nullptr, nullptr);
 		for (Eye& e : eyes_) {
-			if (e.sc != XR_NULL_HANDLE) call("xrDestroySwapchain", [&] { return xrDestroySwapchain(e.sc); });
+			if (e.sc != XR_NULL_HANDLE) callGl("xrDestroySwapchain", [&] { return xrDestroySwapchain(e.sc); });
 			e = Eye{};
 		}
 		if (viewSpace_ != XR_NULL_HANDLE) call("xrDestroySpace", [&] { return xrDestroySpace(viewSpace_); });
 		if (appSpace_ != XR_NULL_HANDLE) call("xrDestroySpace", [&] { return xrDestroySpace(appSpace_); });
-		if (sess_ != XR_NULL_HANDLE) call("xrDestroySession", [&] { return xrDestroySession(sess_); });
+		if (sess_ != XR_NULL_HANDLE) callGl("xrDestroySession", [&] { return xrDestroySession(sess_); });
 		if (messenger_ != XR_NULL_HANDLE) {
 			PFN_xrDestroyDebugUtilsMessengerEXT destroy = nullptr;
 			if (XR_SUCCEEDED(call("xrGetInstanceProcAddr(xrDestroyDebugUtilsMessengerEXT)", [&] {
@@ -806,6 +841,9 @@ private:
 		sys_ = XR_NULL_SYSTEM_ID;
 		state_ = XR_SESSION_STATE_UNKNOWN;
 		running_ = lost_ = stopping_ = frameBegun_ = renderFrame_ = false;
+		sessionEnded_ = recenterPending_ = false;
+		recenterAt_ = 0;
+		appSpaceType_ = XR_REFERENCE_SPACE_TYPE_STAGE;
 		eyeDone_[0] = eyeDone_[1] = false;
 		trackingWarned_ = endFrameWarned_ = false;
 		runtime_.clear();
@@ -840,6 +878,10 @@ private:
 	bool lost_ = false;         // session unusable (sticky until stop)
 	bool stopping_ = false;     // inside stop(): state/lost messages are not printed
 	bool frameBegun_ = false;   // xrBeginFrame succeeded, xrEndFrame pending
+	bool sessionEnded_ = false;     // xrEndSession was called (a later xrBeginSession is a restart)
+	bool recenterPending_ = false;  // FrameInfo::recenter to report once displayTime_ >= recenterAt_
+	XrTime recenterAt_ = 0;
+	XrReferenceSpaceType appSpaceType_ = XR_REFERENCE_SPACE_TYPE_STAGE;   // what appSpace_ is based on
 	bool renderFrame_ = false;  // FrameInfo::render of the current frame
 	bool eyeDone_[2] = {false, false};
 	std::string runtime_, format_;   // for info(): runtime name + version, swapchain format

@@ -825,7 +825,12 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 		if (VRG_SimActive() && !block_drawing)
 		{
 			/* HXVR: the desktop window is usually unfocused in VR; the VR runtime paces
-			 * frames in VR_BeginFrame, so neither sleep nor skip drawing here. */
+			 * frames in VR_BeginFrame, so neither sleep nor skip drawing here (and undo a
+			 * skip left from before VR started). Unfocused, sound keeps playing and the
+			 * joystick keeps working (gl_vidnt.c AppActivate, in_win.c IN_Move); the mouse
+			 * is released and Windows sends keystrokes only to the focused window, so
+			 * keyboard/mouse need the desktop window focused (click it). */
+			scr_skipupdate = 0;
 		}
 		else if ((cl.paused && !ActiveApp) || Minimized || block_drawing)
 		{

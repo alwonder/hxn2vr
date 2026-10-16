@@ -251,7 +251,7 @@ void VR_GetStatus(vr_status_t *out) {
 	}
 }
 int  VR_BeginFrame(vr_frame_t *out) {
-	if (out) { out->render = 0; out->focused = 0; out->lost = 0; }
+	if (out) { out->render = 0; out->focused = 0; out->lost = 0; out->recenter = 0; }
 	if (!g_backend) return 0;
 	finish_frame();   // a frame left pending (longjmp, or the screen was not drawn) ends first
 	const double now = host_time();
@@ -259,7 +259,12 @@ int  VR_BeginFrame(vr_frame_t *out) {
 	count_frame(now, fi.render);
 	g_framePending = true;
 	g_frameRender = fi.render;
-	if (out) { out->render = fi.render; out->focused = fi.focused; out->lost = fi.lost; }
+	if (out) {
+		out->render = fi.render;
+		out->focused = fi.focused;
+		out->lost = fi.lost;
+		out->recenter = fi.recenter;
+	}
 	return 1;
 }
 void VR_GetHeadPose(vr_pose_t *out) {

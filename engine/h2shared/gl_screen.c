@@ -1227,7 +1227,7 @@ WARNING: be very careful calling this from elsewhere, because the refresh
 needs almost the entire 256k of stack space!
 ==================
 */
-static void SCR_Draw2D (void);	/* HXVR */
+static void SCR_Draw2D (qboolean vr_panel);	/* HXVR */
 
 void SCR_UpdateScreen (void)
 {
@@ -1292,7 +1292,7 @@ void SCR_UpdateScreen (void)
 #endif
 		V_RenderView ();
 
-	SCR_Draw2D ();	/* HXVR: 2D block moved into SCR_Draw2D */
+	SCR_Draw2D (false);	/* HXVR: 2D block moved into SCR_Draw2D */
 
 	V_UpdatePalette ();
 
@@ -1301,9 +1301,10 @@ void SCR_UpdateScreen (void)
 
 /* HXVR: the 2D part of SCR_UpdateScreen (status bar, console, menus...), also drawn into the VR
  * panel (Task 1.8) */
-static void SCR_Draw2D (void)
+static void SCR_Draw2D (qboolean vr_panel)
 {
 	GL_Set2D ();
+	if (!vr_panel)	/* HXVR: the VR panel has no refresh; its background stays transparent */
 	SCR_TileClear ();	// draw any areas not covered by the refresh
 
 #if defined(H2W)
@@ -1368,6 +1369,6 @@ static void SCR_Draw2D (void)
 
 void SCR_Draw2DForVR (void)	/* HXVR */
 {
-	SCR_Draw2D ();
+	SCR_Draw2D (true);
 }
 
