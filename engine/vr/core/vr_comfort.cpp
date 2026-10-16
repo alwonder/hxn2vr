@@ -36,7 +36,7 @@ namespace {
 // afterwards, so vertices are in clip space (NDC).
 void beginClipSpace(const GlExt &gl) {
 	gl.glPushAttrib(gl::kEnableBit | gl::kColorBufferBit | gl::kDepthBufferBit | gl::kCurrentBit |
-	                gl::kPolygonBit | gl::kTransformBit);
+	                gl::kPolygonBit | gl::kTransformBit | gl::kLightingBit);
 	setOverlayState(gl);
 	gl.glDisable(gl::kTexture2D);
 	gl.glMatrixMode(gl::kProjection);
@@ -82,6 +82,9 @@ void drawVignette(const GlExt &gl, float cx, float cy, float inner) {
 	if (inner < 0.0f) inner = 0.0f;
 	const float mid = inner + kVignetteFeather;
 	beginClipSpace(gl);
+	// The engine runs with GL_FLAT (a quad takes its last vertex's colour): without GL_SMOOTH the gradient
+	// ring would be one solid alpha. The shade model is restored by the pop (kLightingBit owns it).
+	gl.glShadeModel(gl::kSmooth);
 	// Two rings per segment: the gradient (alpha 0 at inner, 1 at mid) and the solid one out to the outer
 	// radius, drawn as quads around (cx, cy). Every vertex sets its own alpha.
 	const float twoPi = 6.28318530718f;
@@ -126,10 +129,6 @@ float VR_Approach(float cur, float target, float rate_per_s, float dt) {
 	if (std::fabs(d) <= step) return target;
 	return d > 0.0f ? cur + step : cur - step;
 }
-
-}  // extern "C"
-
-extern "C" {
 
 float VR_VignetteInner(float strength, float amount) {
 	const auto clamp01 = [](float v) { return std::isfinite(v) ? (v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v)) : 0.0f; };

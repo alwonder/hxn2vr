@@ -46,7 +46,10 @@ struct FakeGl {
 	bool inBegin = false;
 	int vertices = 0;
 	float color[4] = {1, 1, 1, 1};
-	struct V { float x, y, a; };
+	gl::GLenum shade = 0x1D00;   // GL_FLAT, as the engine leaves it
+	gl::GLenum shadeStack[4] = {};
+	int smoothSets = 0;
+	struct V { float x, y, a; bool smooth; };
 	std::vector<V> verts;   // every glVertex2f inside glBegin with the alpha current at that moment
 	int begins = 0;
 };
@@ -59,8 +62,10 @@ int mode_index() { return g_fake->mode == kProjection ? 0 : 1; }
 
 void HXVR_GLAPI f_push_attrib(gl::GLbitfield bits) {
 	g_fake->calls.push_back("pushattrib");
-	if (bits & kTransformBit) g_fake->modeStack[g_fake->modeTop++] = g_fake->mode;
-	else g_fake->modeStack[g_fake->modeTop++] = 0;
+	if (bits & kTransformBit) g_fake->modeStack[g_fake->modeTop] = g_fake->mode;
+	else g_fake->modeStack[g_fake->modeTop] = 0;
+	g_fake->shadeStack[g_fake->modeTop] = (bits & gl::kLightingBit) ? g_fake->shade : 0;   // the lighting group owns it
+	++g_fake->modeTop;
 	++g_fake->attribDepth;
 	if (g_fake->attribDepth > g_fake->maxAttribDepth) g_fake->maxAttribDepth = g_fake->attribDepth;
 }
@@ -68,7 +73,12 @@ void HXVR_GLAPI f_pop_attrib() {
 	g_fake->calls.push_back("popattrib");
 	const gl::GLenum m = g_fake->modeStack[--g_fake->modeTop];
 	if (m) g_fake->mode = m;
+	if (g_fake->shadeStack[g_fake->modeTop]) g_fake->shade = g_fake->shadeStack[g_fake->modeTop];
 	--g_fake->attribDepth;
+}
+void HXVR_GLAPI f_shade_model(gl::GLenum m) {
+	g_fake->shade = m;
+	if (m == gl::kSmooth) ++g_fake->smoothSets;
 }
 void HXVR_GLAPI f_matrix_mode(gl::GLenum m) { g_fake->mode = m; }
 void HXVR_GLAPI f_push_matrix() { ++g_fake->matrixDepth[mode_index()]; }
@@ -86,7 +96,7 @@ void HXVR_GLAPI f_end() { g_fake->inBegin = false; g_fake->calls.push_back("end"
 void HXVR_GLAPI f_vertex2f(float x, float y) {
 	if (!g_fake->inBegin) return;
 	++g_fake->vertices;
-	g_fake->verts.push_back({x, y, g_fake->color[3]});
+	g_fake->verts.push_back({x, y, g_fake->color[3], g_fake->shade == gl::kSmooth});
 }
 
 GlExt fake_ext() {
@@ -97,6 +107,7 @@ GlExt fake_ext() {
 	e.glPushMatrix = f_push_matrix;
 	e.glPopMatrix = f_pop_matrix;
 	e.glLoadIdentity = f_load_identity;
+	e.glShadeModel = f_shade_model;
 	e.glEnable = f_enable;
 	e.glDisable = f_disable;
 	e.glBlendFunc = f_blend_func;
@@ -208,6 +219,8 @@ TEST_CASE("vignette ring geometry and GL state") {
 		maxR = std::fmax(maxR, r);
 		CHECK(v.a >= 0.0f);
 		CHECK(v.a <= 1.0f);
+		CHECK(v.smooth);   // flat shading would give each quad its last vertex's alpha: no gradient
+		if (r > 1.31f + 1e-3f) CHECK(v.a == 1.0f);   // the outer ring is solid
 		if (std::fabs(r - 0.96f) < 1e-4f) aAtInner = v.a;
 		if (std::fabs(r - 1.31f) < 1e-4f) aAtSolid = v.a;
 	}
@@ -223,6 +236,8 @@ TEST_CASE("vignette ring geometry and GL state") {
 	CHECK(fake.matrixDepth[0] == 0);
 	CHECK(fake.matrixDepth[1] == 0);
 	CHECK(fake.mode == kModelview);
+	CHECK(fake.smoothSets == 1);
+	CHECK(fake.shade == 0x1D00);   // the engine's GL_FLAT is back after the ring
 	CHECK(fake.begins >= 1);
 	CHECK_FALSE(fake.inBegin);
 

@@ -58,6 +58,7 @@ constexpr GLenum kDepthTest = 0x0B71;
 constexpr GLenum kCullFace = 0x0B44;
 constexpr GLenum kAlphaTest = 0x0BC0;
 constexpr GLenum kLighting = 0x0B50;
+constexpr GLenum kSmooth = 0x1D01;
 constexpr GLenum kFog = 0x0B60;
 constexpr GLenum kStencilTest = 0x0B90;
 constexpr GLenum kSrcAlpha = 0x0302;
@@ -67,6 +68,7 @@ constexpr GLenum kTextureEnv = 0x2300;
 constexpr GLenum kTextureEnvMode = 0x2200;
 constexpr GLenum kModulate = 0x2100;
 constexpr GLbitfield kCurrentBit = 0x00000001;
+constexpr GLbitfield kLightingBit = 0x00000040;   // owns the shade model
 constexpr GLbitfield kPolygonBit = 0x00000008;
 constexpr GLbitfield kEnableBit = 0x00002000;
 constexpr GLbitfield kTextureBit = 0x00040000;
@@ -122,6 +124,7 @@ struct GlExt {
 	void (HXVR_GLAPI *glPushMatrix)() = nullptr;
 	void (HXVR_GLAPI *glPopMatrix)() = nullptr;
 	void (HXVR_GLAPI *glLoadIdentity)() = nullptr;
+	void (HXVR_GLAPI *glShadeModel)(gl::GLenum) = nullptr;
 
 	// Resolves every entry point. On failure returns false, names the missing function in `err`
 	// and leaves the struct in an unusable (partially loaded) state.

@@ -65,6 +65,7 @@ bool GlExt::load(void *(*getProc)(const char *), std::string &err) {
 	HXVR_GL(glPushMatrix)
 	HXVR_GL(glPopMatrix)
 	HXVR_GL(glLoadIdentity)
+	HXVR_GL(glShadeModel)
 #undef HXVR_GL
 	return true;
 }
