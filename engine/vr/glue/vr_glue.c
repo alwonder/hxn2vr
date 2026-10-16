@@ -11,12 +11,13 @@
 cvar_t	vr_enabled = {"vr_enabled", "0", CVAR_ARCHIVE};
 cvar_t	vr_backend = {"vr_backend", "openxr", CVAR_ARCHIVE};	/* openxr / mock */
 cvar_t	vr_render_scale = {"vr_render_scale", "1.0", CVAR_ARCHIVE};
-cvar_t	vr_world_scale = {"vr_world_scale", "1.0", CVAR_ARCHIVE};
+cvar_t	vr_world_scale = {"vr_world_scale", "1.2", CVAR_ARCHIVE};
 cvar_t	vr_eye_height = {"vr_eye_height", "1.65", CVAR_ARCHIVE};	/* metres */
 cvar_t	vr_nearclip = {"vr_nearclip", "2", CVAR_ARCHIVE};		/* units */
 cvar_t	vr_mirror = {"vr_mirror", "1", CVAR_ARCHIVE};		/* 0 none, 1 left eye, 2 both */
 cvar_t	vr_panel_distance = {"vr_panel_distance", "1.5", CVAR_ARCHIVE};	/* metres */
 cvar_t	vr_panel_width = {"vr_panel_width", "1.2", CVAR_ARCHIVE};	/* metres */
+cvar_t	vr_panel_pitch = {"vr_panel_pitch", "15", CVAR_ARCHIVE};	/* degrees below eye level (in-game panel) */
 cvar_t	vr_mock_motion = {"vr_mock_motion", "0", CVAR_NONE};
 cvar_t	vr_mock_hz = {"vr_mock_hz", "90", CVAR_NONE};
 cvar_t	vr_debug_ticks = {"vr_debug_ticks", "0", CVAR_NONE};
@@ -36,6 +37,7 @@ void VRG_Init (void)
 	Cvar_RegisterVariable (&vr_mirror);
 	Cvar_RegisterVariable (&vr_panel_distance);
 	Cvar_RegisterVariable (&vr_panel_width);
+	Cvar_RegisterVariable (&vr_panel_pitch);
 	Cvar_RegisterVariable (&vr_mock_motion);
 	Cvar_RegisterVariable (&vr_mock_hz);
 	Cvar_RegisterVariable (&vr_debug_ticks);
@@ -94,8 +96,14 @@ static float		vrg_ticks_per_s;
 static qboolean		vrg_restart_wanted;
 
 /* vr_eye_height (metres) and vr_world_scale in use (VRG_CheckScaleCvars): the last valid values */
-static float		vrg_eye_height = 1.65f, vrg_world_scale = 1.0f;
+static float		vrg_eye_height = 1.65f, vrg_world_scale = 1.2f;
 static qboolean		vrg_eye_height_warned, vrg_world_scale_warned;
+
+/* vr_panel_pitch in use (VRG_CheckPanelPitch): the last valid value, clamped to [-30, 80] */
+#define VRG_PANEL_PITCH_MIN	(-30.0f)
+#define VRG_PANEL_PITCH_MAX	80.0f
+static float		vrg_panel_pitch = 15.0f;
+static qboolean		vrg_panel_pitch_warned;
 
 /* Module messages can arrive mid-frame (e.g. from VR_BeginEye): Con_Printf may re-enter
  * SCR_UpdateScreen while cls.signon != SIGNONS, so only safe prints here. */
@@ -179,6 +187,26 @@ static void VRG_CheckScaleCvars (void)
 {
 	VRG_CheckScaleCvar (&vr_eye_height, &vrg_eye_height, &vrg_eye_height_warned);
 	VRG_CheckScaleCvar (&vr_world_scale, &vrg_world_scale, &vrg_world_scale_warned);
+}
+
+/* A non-finite vr_panel_pitch is ignored (last valid value stays, one warning); a finite one is
+ * clamped to [-30, 80] degrees. */
+static void VRG_CheckPanelPitch (void)
+{
+	const float	v = vr_panel_pitch.value;
+
+	if (v - v == 0.0f)	/* false for NaN and infinities */
+	{
+		vrg_panel_pitch = (v < VRG_PANEL_PITCH_MIN) ? VRG_PANEL_PITCH_MIN :
+				  (v > VRG_PANEL_PITCH_MAX) ? VRG_PANEL_PITCH_MAX : v;
+		vrg_panel_pitch_warned = false;
+	}
+	else if (!vrg_panel_pitch_warned)
+	{
+		Con_SafePrintf ("VR: invalid %s \"%s\" ignored, using %g\n", vr_panel_pitch.name,
+				vr_panel_pitch.string, vrg_panel_pitch);
+		vrg_panel_pitch_warned = true;
+	}
 }
 
 static void VRG_EndFrame (void)
@@ -492,7 +520,7 @@ static void VRG_PanelPlace (qboolean world, const vec3_t feet, float body_yaw, f
 
 	if (world && dest == key_game)
 	{
-		/* follows the body: 35 degrees below the (nominal) eye, vr_panel_distance ahead */
+		/* follows the body: vr_panel_pitch degrees below the (nominal) eye, vr_panel_distance ahead */
 		vr_vec3_t	eye;
 
 		eye.x = vrg_anchor.x;
@@ -500,7 +528,8 @@ static void VRG_PanelPlace (qboolean world, const vec3_t feet, float body_yaw, f
 		eye.z = vrg_anchor.z;
 		VR_EyeOrigin (feet, body_yaw, &eye, &vrg_anchor, upm, center);
 		yaw = body_yaw;
-		pitch = 35.0f;
+		VRG_CheckPanelPitch ();
+		pitch = vrg_panel_pitch;
 		ang[0] = pitch;
 		ang[1] = yaw;
 		ang[2] = 0;
