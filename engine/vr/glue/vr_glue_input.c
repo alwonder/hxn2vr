@@ -205,7 +205,8 @@ void VRG_InputFrame (void)
 			else if (!(vrg_in_buttons[hand] & bit) && (down & bit))
 			{
 				vrg_in_buttons[hand] |= bit;
-				key = VRG_ButtonKey (Key_GetDest (), role, b);
+				/* vr_calibrate takes its presses itself: no key, so nothing to release later */
+				key = VRG_CalibratePress (hand, role, bit) ? 0 : VRG_ButtonKey (Key_GetDest (), role, b);
 				vrg_in_key[hand][b] = key;
 				if (key)
 					VRG_KeyDown (key);
@@ -277,19 +278,19 @@ float VRG_TurnStep (void)
  * and haste are applied by the engine afterwards. */
 void VRG_StickMove (usercmd_t *cmd)
 {
-	vr_hand_t	h;
+	vr_hand_t	hands[2], h;
 	vr_pose_t	head_pose;
 	float		head[3], stick[2], move[2], move_yaw, view_yaw;
 
 	if (!VRG_StickGameplay ())
 		return;
-	VR_GetHand (1 - VRG_MainHand (), &h);
+	VRG_TrackedPoses (&head_pose, NULL, hands);
+	h = hands[1 - VRG_MainHand ()];
 	if (!h.active)
 		return;
 	VR_StickDeadzone (h.stick, vr_stick_deadzone.value, stick);
 	if (stick[0] == 0.0f && stick[1] == 0.0f)
 		return;
-	VR_GetHeadPose (&head_pose);
 	VR_TrackingToQuakeAngles (&head_pose.rot, head);
 	/* a hand without a valid pose keeps stale poses: VR_MoveYaw falls back to the head */
 	move_yaw = VR_MoveYaw (vr_movement_mode.integer, &h.aim.rot, h.pose_valid, head[YAW], vrg_body_yaw);

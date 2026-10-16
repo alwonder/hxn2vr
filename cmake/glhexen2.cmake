@@ -93,6 +93,7 @@ set(HXN2VR_SOURCES
     # HXVR: engine-side glue for the VR module (C)
     engine/vr/glue/vr_glue.c
     engine/vr/glue/vr_glue_input.c
+    engine/vr/glue/vr_glue_body.c
 
     engine/h2shared/win32res.rc
 )

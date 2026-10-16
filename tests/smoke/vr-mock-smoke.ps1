@@ -32,7 +32,10 @@
        stick pushed forward for ~2 s, `vr_where` (B), the right (main-hand) stick pushed to the right and
        released, `vr_where` (C). The three `VR: where ...` lines must show A -> B more than 32 units apart
        on the floor plane (the mock's left aim is the identity, so the move follows the body yaw) and a
-       yaw change B -> C of -45 (315 mod 360, +-1: one snap turn to the right, once per push).
+       yaw change B -> C of -45 (315 mod 360, +-1: one snap turn to the right, once per push). Between
+       B and C: `vr_calibrate` and the main trigger pressed twice (eye height, then arm): the log must have
+       `VR: calibration done: eye height 1.65 m, arm 0.53 m` (the mock head is at 1.65 m, its right hand 0.535 m
+       from the shoulder), and C must show no held key (the calibration took the trigger presses).
 
   check_shot --stereo alone cannot prove VR ran, so every run also uses -condebug and the
   console log must contain `VR: started (mock)` and no `VR:` error line (`VR: recentered` is allowed;
@@ -104,8 +107,11 @@ $all = [ordered]@{
             'vr_where',                                                # B
             ('vr_mock_hand right sx 1; ' + ((@('wait') * 20) -join '; ')),   # one snap turn to the right
             ('vr_mock_hand right sx 0; ' + ((@('wait') * 20) -join '; ')),
-            'vr_where');                                               # C
-        Stereo = $true; Where = $true; WaitLines = 3; Pending = $false }
+            'vr_calibrate',                                            # step 1: stand, look ahead, trigger
+            'vr_mock_hand right trigger 1', 'vr_mock_hand right trigger 0',
+            'vr_mock_hand right trigger 1', 'vr_mock_hand right trigger 0',   # step 2: arm out, trigger
+            'vr_where');                                               # C (also: no key left held by the triggers)
+        Stereo = $true; Where = $true; Calibrate = $true; WaitLines = 3; Pending = $false }
     # quit from the controller in the main menu (no map). The first line runs before VR starts (same
     # command buffer pass as +vr_enabled 1); the mock commands run once it is up. Hexen.rc opens the
     # main menu at startup (menu_main): `menu_main; togglemenu` closes it whatever Hexen.rc did, so
@@ -161,6 +167,12 @@ function Test-VrLog([string]$path, $sc) {
     }
     if ($sc.Recenter -and -not ($vrLines -ccontains 'VR: recentered')) { return "log has no 'VR: recentered' line (auto-recenter did not run)" }
     if ($sc.Bindings -and -not ($vrLines -ccontains 'VR: default controller bindings set')) { return "log has no 'VR: default controller bindings set' line" }
+    if ($sc.Calibrate) {
+        # mock head at 1.65 m; the right hand at (0.2, 1.0, -0.3) is 0.535 m from the shoulder (0.2283, 1.4420, 0)
+        if (-not ($vrLines -ccontains 'VR: calibration done: eye height 1.65 m, arm 0.53 m')) {
+            return "log has no 'VR: calibration done: eye height 1.65 m, arm 0.53 m' line: $($vrLines -join ' | ')"
+        }
+    }
     if ($sc.Where) {
         $re = '^VR: where origin (\S+) (\S+) (\S+) yaw (\S+) lean (\S+) (\S+) view (\S+) crouch (\d) held (\d+) crouchkey (\d)$'
         $w = @($vrLines | Where-Object { $_ -cmatch $re })
@@ -180,7 +192,8 @@ function Test-VrLog([string]$path, $sc) {
     }
     # Expected VR: lines are the start/stop/recenter/default-bindings notices (and vr_where output); anything else is an error report.
     $bad = @($vrLines | Where-Object { $_ -cne 'VR: started (mock)' -and $_ -cne 'VR: stopped' -and $_ -cne 'VR: recentered' -and
-        $_ -cne 'VR: default controller bindings set' -and $_ -cnotmatch '^VR: where ' })
+        $_ -cne 'VR: default controller bindings set' -and $_ -cnotmatch '^VR: where ' -and
+        $_ -cnotmatch '^VR: calibration done: ' })
     if ($bad.Count) { return "log has VR error line(s): $($bad -join ' | ')" }
     return $null
 }

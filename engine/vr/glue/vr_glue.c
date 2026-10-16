@@ -25,7 +25,6 @@ cvar_t	vr_debug_ticks = {"vr_debug_ticks", "0", CVAR_NONE};
 
 static void VRG_Recenter_f (void);
 static void VRG_Status_f (void);
-static void VRG_Recenter (void);
 
 void VRG_Init (void)
 {
@@ -45,6 +44,7 @@ void VRG_Init (void)
 	Cmd_AddCommand ("vr_recenter", VRG_Recenter_f);
 	Cmd_AddCommand ("vr_status", VRG_Status_f);
 	VRG_InputInit ();	/* vr_mainhand, vr_bind_defaults, vr_mock_hand, vr_mock_head */
+	VRG_BodyInit ();	/* vr_seated, vr_height_offset, vr_body_*, vr_calibrate, vr_body */
 }
 
 /* ---- VR session state ---- */
@@ -183,7 +183,7 @@ static void VRG_CheckScaleCvar (cvar_t *var, float *inuse, qboolean *warned)
 	}
 }
 
-static void VRG_CheckScaleCvars (void)
+void VRG_CheckScaleCvars (void)
 {
 	VRG_CheckScaleCvar (&vr_eye_height, &vrg_eye_height, &vrg_eye_height_warned);
 	VRG_CheckScaleCvar (&vr_world_scale, &vrg_world_scale, &vrg_world_scale_warned);
@@ -270,6 +270,7 @@ static void VRG_Start (void)
 	vrg_panel_reanchor = false;
 	vrg_panel_open = false;
 	vrg_in_update = false;
+	VRG_CalibrateReset ();
 	vrg_dbg_frames = vrg_dbg_ticks = 0;
 	vrg_dbg_start = Sys_DoubleTime ();
 	vrg_tick_start = vrg_tick_last = Sys_DoubleTime ();
@@ -285,6 +286,7 @@ static void VRG_Start (void)
 static void VRG_Stop (void)
 {
 	VRG_ReleaseAllKeys ();	/* no +attack / +jump stays held by a controller button */
+	VRG_CalibrateReset ();
 	VRG_EndFrame ();
 	VR_Stop ();
 	VRG_RestoreSwapInterval ();
@@ -347,6 +349,7 @@ qboolean VRG_HostFrameBegin (void)
 		}
 
 		VRG_InputFrame ();	/* controller buttons -> key events (may change key_dest) */
+		VRG_CalibrateFrame ();	/* vr_calibrate prompt */
 
 		if (vr_debug_ticks.integer)
 		{
@@ -398,7 +401,7 @@ static void VRG_HeadAngles (float angles[3])
 {
 	vr_pose_t	pose;
 
-	VR_GetHeadPose (&pose);
+	VRG_TrackedPoses (&pose, NULL, NULL);
 	VR_TrackingToQuakeAngles (&pose.rot, angles);
 }
 
@@ -459,11 +462,11 @@ void VRG_OnSetAngle (void)
 
 /* the head's current position (x, z) becomes the player's origin (vr_recenter, and automatically
  * on the first rendered frame after VR starts). Safe print: may run mid-frame. */
-static void VRG_Recenter (void)
+void VRG_Recenter (void)
 {
 	vr_pose_t	pose;
 
-	VR_GetHeadPose (&pose);
+	VRG_TrackedPoses (&pose, NULL, NULL);
 	vrg_anchor.x = pose.pos.x;
 	vrg_anchor.y = 0;
 	vrg_anchor.z = pose.pos.z;
@@ -632,7 +635,7 @@ qboolean VRG_UpdateScreen (void)
 	vec3_t		feet, save_org, save_ang, head_ang, eye_org, eye_ang, head_org, head_view;
 	float		body_yaw, upm;
 	float		corners[4][3];
-	vr_pose_t	pose;
+	vr_pose_t	head, eyes[2];
 	vr_vec3_t	anchor = vrg_anchor;
 
 	if (vrg_in_update)
@@ -664,9 +667,9 @@ qboolean VRG_UpdateScreen (void)
 
 	/* the 2D layer (menus, console, HUD, centerprint...) goes into the panel texture first;
 	 * without a world the player stands at the origin */
-	VR_GetHeadPose (&pose);
-	VR_EyeOrigin (feet, body_yaw, &pose.pos, &anchor, upm, head_org);
-	VR_TrackingToQuakeAngles (&pose.rot, head_ang);
+	VRG_TrackedPoses (&head, eyes, NULL);	/* with vr_height_offset */
+	VR_EyeOrigin (feet, body_yaw, &head.pos, &anchor, upm, head_org);
+	VR_TrackingToQuakeAngles (&head.rot, head_ang);
 	VR_ComposeViewAngles (body_yaw, head_ang, head_view);
 	VRG_PanelPlace (world, feet, body_yaw, upm, head_org, head_view, corners);
 	panel = VRG_RenderPanel ();
@@ -676,9 +679,9 @@ qboolean VRG_UpdateScreen (void)
 	{
 		if (VR_BeginEye (eye))
 		{
-			VR_GetEye (eye, &pose, &vrg_eye_fov);
-			VR_EyeOrigin (feet, body_yaw, &pose.pos, &anchor, upm, eye_org);
-			VR_TrackingToQuakeAngles (&pose.rot, head_ang);
+			VR_GetEye (eye, NULL, &vrg_eye_fov);
+			VR_EyeOrigin (feet, body_yaw, &eyes[eye].pos, &anchor, upm, eye_org);
+			VR_TrackingToQuakeAngles (&eyes[eye].rot, head_ang);
 			VR_ComposeViewAngles (body_yaw, head_ang, eye_ang);
 			if (world)
 			{

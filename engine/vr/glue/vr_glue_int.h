@@ -39,4 +39,26 @@ float VRG_TurnStep (void);
  * 'y' / 'n' instead of the key_dest routing, and skips the menu stick arrows */
 extern qboolean		vrg_input_modal;
 
+/* ---- body model, tracked poses, calibration (vr_glue_body.c) ---- */
+
+extern vr_body_t	vrg_body;		/* current body model (metres), from vr_eye_height and the vr_body_* cvars */
+extern float		vrg_height_offset;	/* vr_height_offset in use (metres) */
+
+void VRG_BodyInit (void);		/* VRG_Init: registers the body cvars and vr_calibrate, vr_body */
+/* The head's, the eyes' and the hands' poses with vr_height_offset added to their y (and nothing else
+ * changed: rotations stay). The ONLY place that applies the offset: renderer, panel, hands, crouch and
+ * room-scale take their poses from here. Any argument may be NULL. Poses of inactive hands stay zero. */
+void VRG_TrackedPoses (vr_pose_t *head, vr_pose_t eyes[2], vr_hand_t hands[2]);
+/* A button of a hand went down (role 0 = main hand, 1 = other): true if vr_calibrate used it, then no
+ * key is sent for it. */
+qboolean VRG_CalibratePress (int hand, int role, unsigned bit);
+qboolean VRG_Calibrating (void);
+void VRG_CalibrateFrame (void);		/* every frame while VR runs: keeps the prompt on the screen */
+void VRG_CalibrateReset (void);		/* VR starts / stops: drops a calibration in progress */
+
+/* ---- from vr_glue.c, for vr_glue_body.c ---- */
+
+void VRG_CheckScaleCvars (void);	/* re-reads vr_eye_height / vr_world_scale into vrg_eye_height / vrg_world_scale */
+void VRG_Recenter (void);		/* the head's x/z becomes the player's origin (prints "VR: recentered") */
+
 #endif /* HXVR_VR_GLUE_INT_H */

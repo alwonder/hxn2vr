@@ -143,6 +143,29 @@ int  VR_BeginPanel(int w, int h);
 void VR_EndPanel(void);
 void VR_DrawPanelQuad(const float corners[4][3]);
 
+/* Body model and calibration (pure functions). Everything is in metres of tracking space with the floor at 0:
+ * none of it takes vr_world_scale (the body does not scale with the world). */
+typedef struct { float eye_height, arm_length, shoulder_width, crouch_fraction; } vr_body_params_t;   /* 0 = derive */
+typedef struct {
+	float eye_height, stature, shoulder_height, shoulder_width, arm_length,
+	      chest_height, waist_height, crouch_height;
+} vr_body_t;
+/* stature = eye / 0.936; shoulder_height 0.818 S; shoulder_width 0.259 S; arm_length 0.40 S; chest_height
+ * 0.72 S; waist_height 0.60 S; crouch_height = crouch_fraction (<= 0 or non-finite: 0.65) * eye. An
+ * override (arm_length, shoulder_width) <= 0 or non-finite is derived. Returns 0 and leaves *out untouched
+ * unless p and out are set and 0.5 <= eye_height <= 2.5 (finite). */
+int VR_BodyFromParams(const vr_body_params_t *p, vr_body_t *out);
+/* 1 and *out = head_y if 0.5 <= head_y <= 2.5 (finite), else 0 (*out untouched). */
+int VR_CalibrateEyeHeight(float head_y, float *out);
+/* Arm length from a hand position held straight ahead at shoulder height. The shoulder is
+ * (head.x, b->shoulder_height, head.z) +/- b->shoulder_width / 2 along the head's horizontal right axis
+ * (hand VR_HAND_RIGHT: +, VR_HAND_LEFT: -); arm = |hand_pos - shoulder|. Returns 1 and *out = arm if
+ * 0.4 <= arm <= 1.0 (finite), else 0 (*out untouched). head / hand_pos in the same (corrected) space. */
+int VR_CalibrateArm(const vr_body_t *b, const vr_pose_t *head, const vr_vec3_t *hand_pos, int hand, float *out);
+/* The distance VR_CalibrateArm measures, without the range check (for the "out of range" message); -1 if
+ * it cannot be computed (NULL or non-finite input, head rotation not a rotation). */
+float VR_ArmDistance(const vr_body_t *b, const vr_pose_t *head, const vr_vec3_t *hand_pos, int hand);
+
 /* pure math */
 float VR_UnitsPerMetre(float eye_height_m, float world_scale);
 void  VR_TrackingToQuakePos(const vr_vec3_t *v, float upm, float out[3]);

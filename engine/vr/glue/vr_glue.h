@@ -25,6 +25,11 @@ extern	cvar_t	vr_turn_mode;		/* 0 snap, 1 smooth */
 extern	cvar_t	vr_snap_angle;
 extern	cvar_t	vr_turn_speed;
 extern	cvar_t	vr_stick_deadzone;
+extern	cvar_t	vr_seated;		/* vr_glue_body.c: 1 = seated mode */
+extern	cvar_t	vr_height_offset;	/* metres, added to the y of head, eyes and hands (VRG_TrackedPoses) */
+extern	cvar_t	vr_body_arm_length;	/* metres, 0 = from the proportions */
+extern	cvar_t	vr_body_shoulder_width;
+extern	cvar_t	vr_crouch_threshold;	/* fraction of vr_eye_height */
 
 void VRG_Init (void);		/* Host_Init, before config.cfg/hexen.rc are executed: registers cvars */
 void VRG_Shutdown (void);	/* Host_Shutdown: stops the module if running */
