@@ -29,6 +29,8 @@
   powershell -File tests/smoke/vr-mock-smoke.ps1 -Exe build/win64/Debug/hxn2vr.exe
   powershell -File tests/smoke/vr-mock-smoke.ps1 -Exe build/win64/Debug/hxn2vr.exe -Scenarios a
   powershell -File tests/smoke/vr-mock-smoke.ps1 -Scenarios a,b -ExtraArgs "+vr_mock_motion 1"
+  powershell -File tests/smoke/vr-mock-smoke.ps1 -Exe build/win64/Release/hxn2vr.exe -ExtraArgs "+vr_debug_ticks 1" -KeepLogDir <dir>
+    (Release exe; the kept logs have the per-second "vr: N frames, M server ticks" lines)
 #>
 [CmdletBinding()]
 param(
@@ -37,7 +39,8 @@ param(
     [string]$GameDir = 'build/game',
     [switch]$IncludePending,
     [int]$TimeoutSec = 180,
-    [string[]]$ExtraArgs = @()   # appended to the VR engine arguments, e.g. +vr_mock_motion 1
+    [string[]]$ExtraArgs = @(),  # appended to the VR engine arguments, e.g. +vr_mock_motion 1
+    [string]$KeepLogDir = ''     # if set, each scenario's console log is copied there as vr_<s>.log
 )
 $ErrorActionPreference = 'Stop'
 # `-File ... -Scenarios a,b` arrives as the single string "a,b"
@@ -164,6 +167,13 @@ foreach ($s in $Scenarios) {
             elseif (Test-Path -LiteralPath $config) { Remove-Item -LiteralPath $config -Force }   # written by this run
         }
         catch { Write-Warning "vr-mock-smoke: could not restore ${config}: $_" }
+        if ($KeepLogDir -and (Test-Path -LiteralPath $log)) {
+            try {
+                New-Item -ItemType Directory -Force -Path $KeepLogDir | Out-Null
+                Copy-Item -LiteralPath $log -Destination (Join-Path $KeepLogDir "vr_$s.log") -Force
+            }
+            catch { Write-Warning "vr-mock-smoke: could not keep the log: $_" }
+        }
         Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath (Join-Path $GameDir "data1\smoke_vr_$s.cfg") -Force -ErrorAction SilentlyContinue
     }
