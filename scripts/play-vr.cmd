@@ -3,7 +3,7 @@ rem hxn2vr: launch the Release build in VR (OpenXR runtime: Virtual Desktop / St
 rem Usage: scripts\play-vr.cmd [extra engine args], e.g. scripts\play-vr.cmd +vr_world_scale 1.2 +map demo1
 rem Console log: build\game\debug_h2.log
 setlocal
-set ROOT=%~dp0..
+for %%I in ("%~dp0..") do set "ROOT=%%~fI"
 set GAME=%ROOT%\build\game
 set EXE=%ROOT%\build\win64\Release\hxn2vr.exe
 if not exist "%EXE%" (
