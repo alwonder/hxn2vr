@@ -103,17 +103,21 @@ void VR_MockSetHeadOffset(const vr_vec3_t* target, float seconds) {
 
 // Menu arrows from a stick (see vr_api.h). The held direction is kept while its own axis stays past
 // kStickHold with the same sign, even if the other axis becomes larger (no flicker on a diagonal);
-// once it is let go, a new direction can start in the same call.
+// once it is let go, a new direction can start in the same call. A call's dt counts as at most
+// kMaxDt, so a long frame (loading, a sound cached on first use...) cannot turn one flick into a
+// repeat, and at most one direction is emitted per call.
 int VR_StickRepeat(vr_repeat_t* r, const float stick[2], float dt) {
 	constexpr float kStickStart = 0.6f;
 	constexpr float kStickHold = 0.3f;
 	constexpr float kRepeatDelay = 0.45f;
 	constexpr float kRepeatEvery = 0.12f;
+	constexpr float kMaxDt = 0.1f;   // < kRepeatEvery: one call never owes more than one repeat
 	if (!r) return VR_DIR_NONE;
 	float x = stick ? stick[0] : 0.0f, y = stick ? stick[1] : 0.0f;
 	if (!std::isfinite(x)) x = 0.0f;
 	if (!std::isfinite(y)) y = 0.0f;
 	if (!std::isfinite(dt) || !(dt > 0.0f)) dt = 0.0f;
+	if (dt > kMaxDt) dt = kMaxDt;
 
 	// the held direction's own axis, signed so that "towards the direction" is positive
 	float along = 0.0f;
@@ -128,8 +132,7 @@ int VR_StickRepeat(vr_repeat_t* r, const float stick[2], float dt) {
 		if (along >= kStickHold) {
 			r->held += dt;
 			if (r->held < r->next) return VR_DIR_NONE;
-			r->next += kRepeatEvery;
-			if (r->next <= r->held) r->next = r->held + kRepeatEvery;   // after a long frame: no burst
+			r->next += kRepeatEvery;   // > held: dt <= kMaxDt < kRepeatEvery
 			return r->dir;
 		}
 		r->dir = VR_DIR_NONE;   // let go

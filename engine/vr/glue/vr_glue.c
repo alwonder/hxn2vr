@@ -363,6 +363,16 @@ qboolean VRG_HostFrameBegin (void)
 	return vrg_active;
 }
 
+qboolean VRG_ModalFrame (void)
+{
+	if (!VR_IsRunning())
+		return false;
+	vrg_input_modal = true;
+	VRG_HostFrameBegin ();	/* ends the dialog's previous frame; the backend paces (no busy spin) */
+	vrg_input_modal = false;
+	return vrg_frame_pending;
+}
+
 int VRG_ServerTicks (double dt)
 {
 	/* the server only advances while the headset is rendering and focused */

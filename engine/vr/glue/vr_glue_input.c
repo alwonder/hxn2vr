@@ -44,6 +44,12 @@ static int		vrg_in_key[2][VRG_NUM_BUTTONS];		/* key sent when the button went do
 static vr_repeat_t	vrg_in_repeat[2];			/* per hand: menu stick repeat */
 static int		vrg_in_main = -1;			/* vr_mainhand (VR_HAND_*) of the last frame */
 static double		vrg_in_time;				/* host time of the last VRG_InputFrame */
+/* bumped by every VRG_InputFrame, VRG_InputStart and VRG_ReleaseAllKeys: a Key_Event that ran one of
+ * them inside (a modal dialog's frames, a video restart from the menu...) has handled the buttons
+ * already, so the interrupted frame stops instead of acting on its stale snapshot */
+static unsigned		vrg_in_serial;
+
+qboolean		vrg_input_modal;	/* vr_glue_int.h: VRG_ModalFrame is running a frame */
 
 static int VRG_MainHand (void)
 {
@@ -52,16 +58,27 @@ static int VRG_MainHand (void)
 
 /* The key a button press sends in this key_dest (0 = none). Menu is Escape everywhere. In the menus
  * and the console: the main hand's trigger, A and X are Enter, B and Y are Escape. The key binding
- * menu (key_menubind) gets the raw K_VR_* keys. Chat (key_message) gets nothing but Menu. */
+ * menu (key_menubind) gets the raw K_VR_* keys. Chat (key_message) gets nothing but Menu.
+ * In a modal yes/no dialog (SCR_ModalMessage): the main trigger, A and X are 'y'; B, Y and Menu 'n'. */
 static int VRG_ButtonKey (keydest_t dest, int role, int b)
 {
+	const unsigned	bit = vrg_button_bit[b];
+
+	if (vrg_input_modal)
+	{
+		if ((bit == VR_BTN_TRIGGER && role == 0) || bit == VR_BTN_LOWER)
+			return 'y';
+		if (bit == VR_BTN_UPPER || bit == VR_BTN_MENU)
+			return 'n';
+		return 0;
+	}
 	if (b == VRG_BUTTON_MENU)
 		return K_ESCAPE;
 	if (dest == key_game || dest == key_menubind)
 		return vrg_game_key[role][b];
 	if (dest == key_menu || dest == key_console)
 	{
-		switch (vrg_button_bit[b])
+		switch (bit)
 		{
 		case VR_BTN_TRIGGER:
 			return (role == 0) ? K_ENTER : 0;
@@ -76,10 +93,38 @@ static int VRG_ButtonKey (keydest_t dest, int role, int b)
 	return 0;
 }
 
+/* SCR_ModalMessage sets key_count to -1 and waits for key_lastpress to become 'y', 'n' or Escape.
+ * A press there only sets key_lastpress (Key_Event stops at the key_count check); a release must not
+ * answer the dialog (key_lastpress is kept) and still runs a +command's -command. */
+static void VRG_KeyDown (int key)
+{
+	if (vrg_input_modal)
+		key_count = -1;
+	Key_Event (key, true);
+}
+
+static void VRG_KeyUp (int key)
+{
+	int	last, count;
+
+	if (!vrg_input_modal)
+	{
+		Key_Event (key, false);
+		return;
+	}
+	last = key_lastpress;
+	count = key_count;
+	key_count = 0;
+	Key_Event (key, false);
+	key_lastpress = last;
+	key_count = count;
+}
+
 void VRG_ReleaseAllKeys (void)
 {
 	int	hand, b, key;
 
+	vrg_in_serial++;
 	for (hand = 0; hand < 2; hand++)
 	{
 		for (b = 0; b < VRG_NUM_BUTTONS; b++)
@@ -88,7 +133,7 @@ void VRG_ReleaseAllKeys (void)
 			if (!key)
 				continue;
 			vrg_in_key[hand][b] = 0;	/* before Key_Event: it may re-enter */
-			Key_Event (key, false);
+			VRG_KeyUp (key);
 		}
 		memset (&vrg_in_repeat[hand], 0, sizeof(vrg_in_repeat[hand]));
 	}
@@ -96,20 +141,18 @@ void VRG_ReleaseAllKeys (void)
 
 static const int	vrg_dir_key[5] = { 0, K_UPARROW, K_DOWNARROW, K_LEFTARROW, K_RIGHTARROW };	/* VR_DIR_* */
 
+static void VRG_MockQueueRun (double now);
+
 void VRG_InputFrame (void)
 {
 	const int	main_hand = VRG_MainHand ();
 	const double	now = Sys_DoubleTime ();
-	float		dt = (float) (now - vrg_in_time);
+	const float	dt = (float) (now - vrg_in_time);	/* VR_StickRepeat caps it at 0.1 s */
+	unsigned	serial;
 	int		hand, b, key, dir;
 
-	/* stick repeat time: a long frame (loading, a sound cached on first use...) counts as at most
-	 * 0.1 s, so a hitch does not turn one flick of the stick into a repeat */
-	if (!(dt >= 0.0f))
-		dt = 0.0f;
-	if (dt > 0.1f)
-		dt = 0.1f;
 	vrg_in_time = now;
+	VRG_MockQueueRun (now);		/* delayed vr_mock_hand changes: seen by the next VR_BeginFrame */
 
 	if (main_hand != vrg_in_main)
 	{
@@ -118,6 +161,10 @@ void VRG_InputFrame (void)
 		vrg_in_main = main_hand;
 	}
 
+	/* after each Key_Event: stop if it ran another input frame, a VR start or a release of all keys
+	 * (vrg_in_serial moved on) */
+	serial = ++vrg_in_serial;
+#define VRG_INTERRUPTED()	(vrg_in_serial != serial)
 	for (hand = 0; hand < 2; hand++)
 	{
 		const int	role = (hand == main_hand) ? 0 : 1;
@@ -139,7 +186,7 @@ void VRG_InputFrame (void)
 				key = vrg_in_key[hand][b];
 				vrg_in_key[hand][b] = 0;
 				if (key)
-					Key_Event (key, false);	/* the key it was pressed with, whatever key_dest is now */
+					VRG_KeyUp (key);	/* the key it was pressed with, whatever key_dest is now */
 			}
 			else if (!(vrg_in_buttons[hand] & bit) && (down & bit))
 			{
@@ -147,13 +194,18 @@ void VRG_InputFrame (void)
 				key = VRG_ButtonKey (Key_GetDest (), role, b);
 				vrg_in_key[hand][b] = key;
 				if (key)
-					Key_Event (key, true);
+					VRG_KeyDown (key);
 			}
+			else
+				continue;
+			if (VRG_INTERRUPTED ())
+				return;
 		}
 
-		/* menus and console: either stick gives arrows (pressed and released at once) */
+		/* menus and console: either stick gives arrows (pressed and released at once); not in a
+		 * modal dialog */
 		dest = Key_GetDest ();
-		if (dest == key_menu || dest == key_console)
+		if (!vrg_input_modal && (dest == key_menu || dest == key_console))
 		{
 			if (h.active)
 			{
@@ -164,7 +216,11 @@ void VRG_InputFrame (void)
 			if (dir > VR_DIR_NONE && dir <= VR_DIR_RIGHT)
 			{
 				Key_Event (vrg_dir_key[dir], true);
+				if (VRG_INTERRUPTED ())
+					return;
 				Key_Event (vrg_dir_key[dir], false);
+				if (VRG_INTERRUPTED ())
+					return;
 			}
 		}
 		else
@@ -172,6 +228,7 @@ void VRG_InputFrame (void)
 			memset (&vrg_in_repeat[hand], 0, sizeof(vrg_in_repeat[hand]));
 		}
 	}
+#undef VRG_INTERRUPTED
 }
 
 /* ---- default bindings ---- */
@@ -207,6 +264,7 @@ void VRG_InputStart (void)
 {
 	int	i;
 
+	vrg_in_serial++;	/* an input frame this start interrupted stops */
 	memset (vrg_in_buttons, 0, sizeof(vrg_in_buttons));
 	memset (vrg_in_key, 0, sizeof(vrg_in_key));
 	memset (vrg_in_repeat, 0, sizeof(vrg_in_repeat));
@@ -229,11 +287,23 @@ void VRG_InputStart (void)
  * VR start: active, both poses valid, held in front of the chest) */
 static vr_hand_t	vrg_mock_hand[2];
 
+/* delayed vr_mock_hand changes (host time), applied in order by VRG_InputFrame -- which also runs
+ * inside a modal dialog's loop, where the command buffer does not run */
+#define VRG_MOCK_QUEUE	16
+static struct
+{
+	double	at;
+	int	hand, field;
+	float	v;
+} vrg_mock_queue[VRG_MOCK_QUEUE];
+static int	vrg_mock_queued;
+
 static void VRG_MockHandsReset (void)
 {
 	int	i;
 
 	memset (vrg_mock_hand, 0, sizeof(vrg_mock_hand));
+	vrg_mock_queued = 0;
 	for (i = 0; i < 2; i++)
 	{
 		vr_hand_t	*h = &vrg_mock_hand[i];
@@ -249,7 +319,7 @@ static void VRG_MockHandsReset (void)
 
 static void VRG_MockHandUsage (void)
 {
-	Con_Printf ("VR: usage: vr_mock_hand <left|right> <trigger|grip|a|b|stick|menu|sx|sy|active|valid> <value>\n");
+	Con_Printf ("VR: usage: vr_mock_hand <left|right> <trigger|grip|a|b|stick|menu|sx|sy|active|valid> <value> [delay]\n");
 }
 
 static void VRG_SetButton (vr_hand_t *h, unsigned bit, qboolean on)
@@ -260,16 +330,57 @@ static void VRG_SetButton (vr_hand_t *h, unsigned bit, qboolean on)
 		h->buttons &= ~bit;
 }
 
-/* vr_mock_hand <left|right> <field> <value>: sets one raw field of a mock hand. a = LOWER, b = UPPER
- * (whichever hand), grip = squeeze, stick = thumbstick click, sx / sy = stick axes. */
+static const char	*vrg_mock_fields[] = {
+	"trigger", "grip", "a", "b", "stick", "menu", "sx", "sy", "active", "valid"
+};
+#define VRG_NUM_MOCK_FIELDS	((int) (sizeof(vrg_mock_fields) / sizeof(vrg_mock_fields[0])))
+
+/* sets field (index into vrg_mock_fields) of the mock hand and sends the hand to the module */
+static void VRG_MockApply (int hand, int field, float v)
+{
+	vr_hand_t	*h = &vrg_mock_hand[hand];
+
+	switch (field)
+	{
+	case 0:	h->trigger = v;					break;
+	case 1:	h->squeeze = v;					break;
+	case 2:	VRG_SetButton (h, VR_BTN_LOWER, v != 0);	break;
+	case 3:	VRG_SetButton (h, VR_BTN_UPPER, v != 0);	break;
+	case 4:	VRG_SetButton (h, VR_BTN_STICK, v != 0);	break;
+	case 5:	VRG_SetButton (h, VR_BTN_MENU, v != 0);		break;
+	case 6:	h->stick[0] = v;				break;
+	case 7:	h->stick[1] = v;				break;
+	case 8:	h->active = (v != 0);				break;
+	case 9:	h->pose_valid = (v != 0);			break;
+	default:						return;
+	}
+	VR_MockSetHand (hand, h);
+}
+
+static void VRG_MockQueueRun (double now)
+{
+	int	i, n = 0;
+
+	for (i = 0; i < vrg_mock_queued; i++)
+	{
+		if (vrg_mock_queue[i].at <= now)
+			VRG_MockApply (vrg_mock_queue[i].hand, vrg_mock_queue[i].field, vrg_mock_queue[i].v);
+		else
+			vrg_mock_queue[n++] = vrg_mock_queue[i];
+	}
+	vrg_mock_queued = n;
+}
+
+/* vr_mock_hand <left|right> <field> <value> [delay]: sets one raw field of a mock hand, at once or
+ * `delay` seconds of host time later. a = LOWER, b = UPPER (whichever hand), grip = squeeze,
+ * stick = thumbstick click, sx / sy = stick axes. */
 static void VRG_MockHand_f (void)
 {
 	const char	*hname, *field;
-	float		v;
-	int		hand;
-	vr_hand_t	*h;
+	float		v, delay = 0;
+	int		hand, f;
 
-	if (Cmd_Argc () != 4)
+	if (Cmd_Argc () != 4 && Cmd_Argc () != 5)
 	{
 		VRG_MockHandUsage ();
 		return;
@@ -277,6 +388,8 @@ static void VRG_MockHand_f (void)
 	hname = Cmd_Argv (1);
 	field = Cmd_Argv (2);
 	v = atof (Cmd_Argv (3));
+	if (Cmd_Argc () == 5)
+		delay = atof (Cmd_Argv (4));
 	if (!q_strcasecmp (hname, "left"))
 		hand = VR_HAND_LEFT;
 	else if (!q_strcasecmp (hname, "right"))
@@ -286,29 +399,12 @@ static void VRG_MockHand_f (void)
 		VRG_MockHandUsage ();
 		return;
 	}
-	h = &vrg_mock_hand[hand];
-
-	if (!q_strcasecmp (field, "trigger"))
-		h->trigger = v;
-	else if (!q_strcasecmp (field, "grip"))
-		h->squeeze = v;
-	else if (!q_strcasecmp (field, "a"))
-		VRG_SetButton (h, VR_BTN_LOWER, v != 0);
-	else if (!q_strcasecmp (field, "b"))
-		VRG_SetButton (h, VR_BTN_UPPER, v != 0);
-	else if (!q_strcasecmp (field, "stick"))
-		VRG_SetButton (h, VR_BTN_STICK, v != 0);
-	else if (!q_strcasecmp (field, "menu"))
-		VRG_SetButton (h, VR_BTN_MENU, v != 0);
-	else if (!q_strcasecmp (field, "sx"))
-		h->stick[0] = v;
-	else if (!q_strcasecmp (field, "sy"))
-		h->stick[1] = v;
-	else if (!q_strcasecmp (field, "active"))
-		h->active = (v != 0);
-	else if (!q_strcasecmp (field, "valid"))
-		h->pose_valid = (v != 0);
-	else
+	for (f = 0; f < VRG_NUM_MOCK_FIELDS; f++)
+	{
+		if (!q_strcasecmp (field, vrg_mock_fields[f]))
+			break;
+	}
+	if (f == VRG_NUM_MOCK_FIELDS || !(delay >= 0))
 	{
 		VRG_MockHandUsage ();
 		return;
@@ -318,7 +414,21 @@ static void VRG_MockHand_f (void)
 		Con_Printf ("VR: not running\n");
 		return;
 	}
-	VR_MockSetHand (hand, h);
+	if (delay > 0)
+	{
+		if (vrg_mock_queued == VRG_MOCK_QUEUE)
+		{
+			Con_Printf ("VR: vr_mock_hand queue full, ignored\n");
+			return;
+		}
+		vrg_mock_queue[vrg_mock_queued].at = Sys_DoubleTime () + delay;
+		vrg_mock_queue[vrg_mock_queued].hand = hand;
+		vrg_mock_queue[vrg_mock_queued].field = f;
+		vrg_mock_queue[vrg_mock_queued].v = v;
+		vrg_mock_queued++;
+		return;
+	}
+	VRG_MockApply (hand, f, v);
 }
 
 /* vr_mock_head <x> <y> <z> [seconds]: moves the mock head to this offset from its rest position

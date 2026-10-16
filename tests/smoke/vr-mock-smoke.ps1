@@ -21,6 +21,12 @@
        have `VR: default controller bindings set` (the VR keys are unbound first, so the defaults are
        set when VR starts). Short waits (WaitLines 3): a stick held for 0.45 s would auto-repeat
        (the glue counts a long frame as at most 0.1 s, so 3 frames stay below that at any frame rate).
+    m  map demo1, mock controller only -> a modal yes/no dialog answered from the controller: Menu opens
+       the main menu, A -> Single Player, A on New Mission opens "start a new game?" (SCR_ModalMessage,
+       whose wait loop runs no commands), B pressed 1 s later by a delayed `vr_mock_hand ... 1.0`
+       answers no (the VR frames and controller polling go on inside the loop), the game stays; then
+       Menu, stick up, A, A quit as in g. -ExpectQuit, WaitLines 3: a dialog that the controller cannot
+       answer hangs until the timeout; a wrong "yes" opens the class menu and the quit path fails.
 
   check_shot --stereo alone cannot prove VR ran, so every run also uses -condebug and the
   console log must contain `VR: started (mock)` and no `VR:` error line (`VR: recentered` is allowed;
@@ -43,7 +49,7 @@
 [CmdletBinding()]
 param(
     [string]$Exe = 'build/win64/Debug/hxn2vr.exe',
-    [string[]]$Scenarios = @('a', 'b', 'c', 'd', 'e', 'g'),
+    [string[]]$Scenarios = @('a', 'b', 'c', 'd', 'e', 'g', 'm'),
     [string]$GameDir = 'build/game',
     [switch]$IncludePending,
     [int]$TimeoutSec = 180,
@@ -92,6 +98,19 @@ $all = [ordered]@{
             'vr_mock_hand right a 1', 'vr_mock_hand right a 0',       # Enter: the "quit?" box
             'vr_mock_hand right a 1', 'vr_mock_hand right a 0');      # Enter: quit (VR only)
         ExpectQuit = $true; WaitLines = 3; Bindings = $true; Pending = $false }
+    # a modal yes/no dialog in game, answered "no" from the controller, then quit (see the header)
+    m = @{ Commands = @(
+            'map demo1', ((@('wait') * 150) -join '; '),             # the level is in
+            'menu_main; togglemenu',                                   # no menu, whatever the start did
+            'vr_mock_hand left menu 1', 'vr_mock_hand left menu 0',   # Escape: the main menu
+            'vr_mock_hand right a 1', 'vr_mock_hand right a 0',       # Enter: Single Player
+            'vr_mock_hand right b 1 1.0; vr_mock_hand right b 0 1.3; vr_mock_hand right a 1',   # New Mission: dialog, B = no
+            'vr_mock_hand right a 0',
+            'vr_mock_hand left menu 1', 'vr_mock_hand left menu 0',   # Escape: back to the main menu
+            'vr_mock_hand right sy 1', 'vr_mock_hand right sy 0',     # up: QUIT
+            'vr_mock_hand right a 1', 'vr_mock_hand right a 0',       # the "quit?" box
+            'vr_mock_hand right a 1', 'vr_mock_hand right a 0');      # quit
+        ExpectQuit = $true; WaitLines = 3; Pending = $false }
 }
 
 # Returns $null if the log is right, 'SKIP: ...' if the scenario cannot run here, else the failure text.
@@ -133,7 +152,7 @@ function Test-VrLog([string]$path, $sc) {
 $failed = @()
 $results = @()
 foreach ($s in $Scenarios) {
-    if (-not $all.Contains($s)) { throw "unknown scenario '$s' (a, b, c, d, e, g)" }
+    if (-not $all.Contains($s)) { throw "unknown scenario '$s' (a, b, c, d, e, g, m)" }
     $sc = $all[$s]
     if ($sc.Pending -and -not $IncludePending) {
         Write-Host "vr-mock-smoke ($s): PENDING (skipped; -IncludePending to run)"

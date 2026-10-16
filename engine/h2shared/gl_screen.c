@@ -924,6 +924,12 @@ int SCR_ModalMessage (const char *text)
 	{
 		key_count = -1;		// wait for a key down and up
 		Sys_SendKeyEvents ();
+		if (VRG_ModalFrame ())	/* HXVR: keep the headset fed, the controllers answer */
+		{
+			scr_drawdialog = true;	/* HXVR */
+			SCR_UpdateScreen ();	/* HXVR */
+			scr_drawdialog = false;	/* HXVR */
+		}
 	} while (key_lastpress != 'y' && key_lastpress != 'n' && key_lastpress != K_ESCAPE);
 
 	scr_fullupdate = 0;

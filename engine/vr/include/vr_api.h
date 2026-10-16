@@ -96,7 +96,10 @@ enum { VR_DIR_NONE = 0, VR_DIR_UP, VR_DIR_DOWN, VR_DIR_LEFT, VR_DIR_RIGHT };
 typedef struct { int dir; float held, next; } vr_repeat_t;
 /* Menu navigation from a stick: a direction starts when its dominant axis reaches 0.6 (emitted at once),
  * stays while that axis keeps the same sign at >= 0.3, repeats after 0.45 s held and then every 0.12 s;
- * returns the direction emitted this call (VR_DIR_NONE most calls). */
+ * returns the direction emitted this call (VR_DIR_NONE most calls).
+ * dt (seconds since the previous call) counts as at most 0.1 s; NaN/negative dt counts as 0, NaN axes
+ * as 0. A held direction is kept until its own axis drops below 0.3 (no switch on a diagonal); |x| == |y|
+ * starts the vertical direction. */
 int VR_StickRepeat(vr_repeat_t *r, const float stick[2], float dt);
 
 /* Per frame, after VR_BeginFrame returned render != 0, for eye 0 then 1:

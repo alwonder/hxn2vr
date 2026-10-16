@@ -32,5 +32,8 @@ void VRG_InputFrame (void);
 /* Releases every key a controller button holds down (Key_Event(code, false) with the code it was
  * pressed with). VRG_Stop, and VRG_InputFrame when vr_mainhand changed. */
 void VRG_ReleaseAllKeys (void);
+/* true while VRG_ModalFrame runs its frame: VRG_InputFrame then maps the buttons to the dialog's
+ * 'y' / 'n' instead of the key_dest routing, and skips the menu stick arrows */
+extern qboolean		vrg_input_modal;
 
 #endif /* HXVR_VR_GLUE_INT_H */

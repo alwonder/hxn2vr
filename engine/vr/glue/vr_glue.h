@@ -34,6 +34,11 @@ qboolean VRG_HostFrameBegin (void);
 /* Number of fixed 1/72 s server ticks to run for a render frame of dt seconds (0 when the
  * session is not rendering/focused: the server does not advance). */
 int VRG_ServerTicks (double dt);
+/* SCR_ModalMessage's wait loop, each iteration: while a VR session runs, begins the next VR frame
+ * (VRG_HostFrameBegin) with the controllers in the dialog mapping (main trigger, A, X = 'y'; B, Y,
+ * Menu = 'n', set as key_lastpress). Returns true if a VR frame was begun: the caller then draws it
+ * with the dialog (SCR_UpdateScreen). False (and nothing done) while VR is not running. */
+qboolean VRG_ModalFrame (void);
 
 /* SCR_UpdateScreen, after SCR_SetUpToDrawConsole: the VR path. If this host frame's VR frame is
  * rendering, renders both eyes, mirrors them into the window (vr_mirror), ends the VR frame and

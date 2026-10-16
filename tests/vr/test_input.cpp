@@ -5,6 +5,7 @@
 #include "vr_module_testing.hpp"
 
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -330,4 +331,55 @@ TEST_CASE("stick repeat for menus") {
 	CHECK(VR_StickRepeat(&r, rel, 0.1f) == VR_DIR_NONE);  // released
 	CHECK(VR_StickRepeat(&r, right, 0.016f) == VR_DIR_RIGHT);
 	float down[2] = {0.1f, -0.7f}; CHECK(VR_StickRepeat(&r, down, 0.016f) == VR_DIR_DOWN);   // new direction at once
+}
+
+TEST_CASE("stick repeat keeps a held direction on a diagonal") {
+	vr_repeat_t r{};
+	float up[2] = {0, 0.9f}, diag[2] = {0.95f, 0.5f};
+	CHECK(VR_StickRepeat(&r, up, 0.016f) == VR_DIR_UP);
+	for (int i = 0; i < 4; ++i) CHECK(VR_StickRepeat(&r, diag, 0.1f) == VR_DIR_NONE);   // x dominant, y still >= 0.3
+	CHECK(VR_StickRepeat(&r, diag, 0.1f) == VR_DIR_UP);   // the held UP repeats, no RIGHT
+}
+
+TEST_CASE("stick repeat counts a long frame as at most 0.1 s") {
+	vr_repeat_t r{};
+	float up[2] = {0, 0.9f};
+	CHECK(VR_StickRepeat(&r, up, 0.016f) == VR_DIR_UP);
+	CHECK(VR_StickRepeat(&r, up, 5.0f) == VR_DIR_NONE);   // a hitch: 0.1 s, not 5 s
+	CHECK(r.held == doctest::Approx(0.1f));
+	for (int i = 0; i < 2; ++i) CHECK(VR_StickRepeat(&r, up, 5.0f) == VR_DIR_NONE);   // 0.2, 0.3
+	CHECK(VR_StickRepeat(&r, up, 0.1f) == VR_DIR_NONE);   // 0.4
+	CHECK(VR_StickRepeat(&r, up, 5.0f) == VR_DIR_UP);     // 0.5 >= 0.45
+	CHECK(VR_StickRepeat(&r, up, 5.0f) == VR_DIR_UP);     // 0.6 >= 0.57: one repeat per call, no burst
+	CHECK(VR_StickRepeat(&r, up, 0.05f) == VR_DIR_NONE);  // 0.65 < 0.69
+}
+
+TEST_CASE("stick repeat ignores NaN and negative dt and NaN axes") {
+	vr_repeat_t r{};
+	float up[2] = {0, 0.9f};
+	CHECK(VR_StickRepeat(&r, up, 0.016f) == VR_DIR_UP);
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	CHECK(VR_StickRepeat(&r, up, nan) == VR_DIR_NONE);
+	CHECK(VR_StickRepeat(&r, up, -1.0f) == VR_DIR_NONE);
+	CHECK(r.held == 0.0f);   // neither advanced the hold
+	CHECK(r.dir == VR_DIR_UP);
+	float bad[2] = {nan, nan};   // NaN axes read as centred: let go
+	CHECK(VR_StickRepeat(&r, bad, 0.016f) == VR_DIR_NONE);
+	CHECK(r.dir == VR_DIR_NONE);
+	CHECK(VR_StickRepeat(&r, up, 0.016f) == VR_DIR_UP);   // starts again at once
+	CHECK(VR_StickRepeat(nullptr, up, 0.016f) == VR_DIR_NONE);
+	vr_repeat_t r2{};
+	CHECK(VR_StickRepeat(&r2, nullptr, 0.016f) == VR_DIR_NONE);   // no stick: centred
+}
+
+TEST_CASE("stick repeat start threshold and tie-break") {
+	vr_repeat_t r{};
+	float weak[2] = {0, 0.59f}, tie[2] = {0.7f, 0.7f}, tie_down[2] = {-0.7f, -0.7f}, centre[2] = {0, 0};
+	CHECK(VR_StickRepeat(&r, weak, 0.016f) == VR_DIR_NONE);   // below 0.6: nothing starts
+	CHECK(VR_StickRepeat(&r, tie, 0.016f) == VR_DIR_UP);      // |x| == |y|: vertical wins
+	CHECK(VR_StickRepeat(&r, centre, 0.016f) == VR_DIR_NONE);
+	CHECK(VR_StickRepeat(&r, tie_down, 0.016f) == VR_DIR_DOWN);
+	float left[2] = {-0.8f, 0.1f};
+	CHECK(VR_StickRepeat(&r, centre, 0.016f) == VR_DIR_NONE);
+	CHECK(VR_StickRepeat(&r, left, 0.016f) == VR_DIR_LEFT);
 }
