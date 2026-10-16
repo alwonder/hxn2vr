@@ -158,3 +158,18 @@ TEST_CASE("arm distance reports the measured length") {
 	vr_vec3_t nan{std::numeric_limits<float>::quiet_NaN(), 1.0f, 0.0f};
 	CHECK(VR_ArmDistance(&b, &head, &nan, VR_HAND_RIGHT) == -1.0f);
 }
+
+TEST_CASE("physical crouch with hysteresis") {   // body(1.65): crouch_height 1.0725, exit above 1.155
+	const vr_body_t b = body_for(1.65f);
+	CHECK(VR_CrouchUpdate(0, 1.10f, &b) == 0);   // above the crouch height: standing
+	CHECK(VR_CrouchUpdate(0, 1.07f, &b) == 1);   // below it: crouched
+	CHECK(VR_CrouchUpdate(1, 1.12f, &b) == 1);   // inside the hysteresis band: stays crouched
+	CHECK(VR_CrouchUpdate(1, 1.16f, &b) == 0);   // above 1.155: up again
+	CHECK(VR_CrouchUpdate(1, std::numeric_limits<float>::quiet_NaN(), &b) == 1);   // no head: the state stays
+	CHECK(VR_CrouchUpdate(0, std::numeric_limits<float>::quiet_NaN(), &b) == 0);
+	vr_body_t bad = b;
+	bad.eye_height = 0.0f;
+	CHECK(VR_CrouchUpdate(0, 0.5f, &bad) == 0);   // body with eye 0
+	CHECK(VR_CrouchUpdate(1, 0.5f, &bad) == 0);
+	CHECK(VR_CrouchUpdate(1, 0.5f, nullptr) == 0);
+}

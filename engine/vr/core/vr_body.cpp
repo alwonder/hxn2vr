@@ -1,6 +1,6 @@
-// vr_body.cpp -- the player's body model, calibration and the room-scale lean (pure functions). The body is
-// in metres of tracking space: nothing here takes vr_world_scale (the body does not scale with the world;
-// the lean is converted to units with the caller's upm). No engine headers.
+// vr_body.cpp -- the player's body model, calibration, the physical crouch and the room-scale lean (pure
+// functions). The body is in metres of tracking space: nothing here takes vr_world_scale (the body does not
+// scale with the world; the lean is converted to units with the caller's upm). No engine headers.
 #include "vr_api.h"
 
 #include <glm/glm.hpp>
@@ -18,6 +18,7 @@ constexpr float kArmLength = 0.40f;
 constexpr float kChestHeight = 0.72f;
 constexpr float kWaistHeight = 0.60f;
 constexpr float kDefaultCrouch = 0.65f;
+constexpr float kCrouchExit = 0.05f;   // of the eye height above the crouch height: stand up again
 
 constexpr float kMinEye = 0.5f, kMaxEye = 2.5f;
 constexpr float kMinArm = 0.4f, kMaxArm = 1.0f;
@@ -134,6 +135,12 @@ int VR_BodyJumped(const float prev_feet[3], const float feet[3]) {
 	const float d2 = dx * dx + dy * dy;
 	if (!std::isfinite(d2)) return 1;
 	return d2 > kMaxBodyStep * kMaxBodyStep ? 1 : 0;
+}
+
+int VR_CrouchUpdate(int crouched, float head_y, const vr_body_t* b) {
+	if (!b || !(b->eye_height > 0.0f) || !std::isfinite(b->eye_height) || !std::isfinite(b->crouch_height)) return 0;
+	if (crouched) return head_y > b->crouch_height + kCrouchExit * b->eye_height ? 0 : 1;   // NaN: stays
+	return head_y < b->crouch_height ? 1 : 0;
 }
 
 int VR_CalibrateArm(const vr_body_t* b, const vr_pose_t* head, const vr_vec3_t* hand_pos, int hand, float* out) {

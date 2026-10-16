@@ -73,7 +73,15 @@ void VRG_RoomFrame (qboolean world, const vec3_t feet, const vr_vec3_t *head, fl
  * a world, connected and signed on, no demo, not paused (client or server), not in intermission, key_game,
  * the headset focused and rendering (VRG_ServerTicks runs ticks), vr_roomscale on */
 qboolean VRG_RoomWalking (void);
-float VRG_HeightScale (void);		/* eye height scale above the feet (game crouch): 1 until Task 2.8 */
+/* Scale of the eye height above the feet: VR_CameraHeightScale (cl.viewheight, physical crouch), where the
+ * physical crouch also counts while the game's view is still rising after standing up from it */
+float VRG_HeightScale (void);
+void VRG_CrouchStart (void);		/* VRG_Start: no crouch state, no fade */
+/* VRG_UpdateScreen, once per rendered frame with the head's centre cam (Quake units; feet as for
+ * VRG_RoomFrame): with a world, vr_head_collision and not noclip, cam is kept 4 units under the ceiling
+ * (moved down in place, *shift_z = the move, for both eyes) and the fade goes to 1 (6/s) while the line from
+ * the body's eye (feet + min(cl.viewheight, head height)) to cam crosses a wall, else to 0. Returns the fade. */
+float VRG_HeadCollide (qboolean world, const vec3_t feet, vec3_t cam, float *shift_z);
 
 /* ---- from vr_glue.c, for vr_glue_body.c ---- */
 

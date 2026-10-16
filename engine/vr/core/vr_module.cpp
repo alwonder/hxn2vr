@@ -5,6 +5,7 @@
 #include "backend.hpp"
 #include "gl_ext.hpp"
 #include "targets.hpp"
+#include "vr_comfort.hpp"
 #include "vr_input.hpp"
 #include "vr_module_testing.hpp"
 
@@ -337,6 +338,11 @@ void VR_EndPanel(void) {
 void VR_DrawPanelQuad(const float corners[4][3]) {
 	if (!g_backend || !g_panel || !corners) return;
 	g_panel->drawQuad(corners);
+}
+void VR_DrawFade(float alpha) {
+	// only into a bound eye target (between VR_BeginEye and VR_EndEye), with the GL entry points loaded
+	if (!g_backend || !g_glLoaded || !(g_eyeBound[0] || g_eyeBound[1])) return;
+	hxvr::drawFade(g_gl, alpha);
 }
 
 }  // extern "C"

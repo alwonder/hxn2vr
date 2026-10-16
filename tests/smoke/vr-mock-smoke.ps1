@@ -47,6 +47,19 @@
        floor plane, and the lean at B must be at the radius (9.09 +- 0.5 units). 2 s, not 1: the Debug exe
        can run the mock at ~6 frames/s, and one frame of more than 0.5 s at 1 m/s would be a head step over
        0.5 m, which the room-scale code drops as a tracking jump. 300 waits: >= 2 s also at the mock's 90 Hz.
+       Part 2, the crouch: the mock head goes down 0.8 m over 2 s (1.65 -> 0.85 m, below the 1.0725 m crouch
+       height) and `vr_where` (C) must show `crouch 1` and the game's view height under 30 (the progs lower it
+       to 24); back up over 2 s, `vr_where` (D): `crouch 0`, view >= 45 (50). Then B (+crouch) pressed in the
+       game, `vr_where` (E): crouchkey 1; Menu opens the main menu, B is released there, Menu closes it again,
+       `vr_where` (F): held 0, crouchkey 0 (the release went out with the key it was pressed with, so
+       -crouch ran although the menu was up). 200 waits per head move: >= 2 s at 90 Hz; TimeoutSec 300
+       because the Debug exe can run this scenario at ~6 frames/s.
+       The button part runs from delayed `vr_mock_hand ... <delay>` changes after the script has ended: a
+       key's binding is appended to the command buffer (Cbuf_AddText), so while script lines are still
+       queued, +crouch / -crouch would only run after the whole script and crouchkey could never be 1.
+       E and F come from the off hand's Y, bound to +hxw (`-hxw` = vr_where: on the release, so Y itself is
+       not counted as held), and the end (screenshot, disconnect, quit) from its stick click (`hxend`):
+       -ExpectQuit, with the screenshot still checked (Shot).
 
   check_shot --stereo alone cannot prove VR ran, so every run also uses -condebug and the
   console log must contain `VR: started (mock)` and no `VR:` error line (`VR: recentered` is allowed;
@@ -134,8 +147,22 @@ $all = [ordered]@{
             'vr_mock_head 0 0 -1 2',                                   # the head walks 1 m forward over 2 s
             ((@('wait') * 150) -join '; '),                            # 300 frames: >= 2 s at the mock's 90 Hz
             ((@('wait') * 150) -join '; '),
-            'vr_where');                                               # B: the body walked ~27 units
-        Stereo = $true; RoomWalk = $true; WaitLines = 3; Pending = $false }
+            'vr_where',                                                # B: the body walked ~27 units
+            'vr_mock_head 0 -0.8 -1 2',                                # crouch for real: down 0.8 m over 2 s
+            ((@('wait') * 200) -join '; '),
+            'vr_where',                                                # C: crouch 1, view < 30
+            'vr_mock_head 0 0 -1 2',                                   # stand up over 2 s
+            ((@('wait') * 200) -join '; '),
+            'vr_where',                                                # D: crouch 0, view >= 45
+            # Y (off hand) released = vr_where; left stick click = the end (VR is up: the defaults are set)
+            'bind VR_Y +hxw; alias +hxw ""; alias -hxw vr_where; alias hxend "screenshot; wait; wait; wait; disconnect; quit"; bind VR_OSTICK hxend',
+            # after the script (delays in s): B pressed in the game, Y (E: crouchkey 1), Menu (the main menu opens),
+            # B released in the menu, Menu (the menu closes), Y (F: held 0, crouchkey 0), stick click (quit)
+            ('vr_mock_hand right b 1 0.6; vr_mock_hand left b 1 1.2; vr_mock_hand left b 0 1.8; ' +
+             'vr_mock_hand left menu 1 2.4; vr_mock_hand left menu 0 3.0; vr_mock_hand right b 0 3.6; ' +
+             'vr_mock_hand left menu 1 4.2; vr_mock_hand left menu 0 4.8; vr_mock_hand left b 1 5.4; ' +
+             'vr_mock_hand left b 0 6.0; vr_mock_hand left stick 1 6.6'));
+        Stereo = $true; RoomWalk = $true; ExpectQuit = $true; Shot = $true; WaitLines = 3; TimeoutSec = 300; Pending = $false }
     # quit from the controller in the main menu (no map). The first line runs before VR starts (same
     # command buffer pass as +vr_enabled 1); the mock commands run once it is up. Hexen.rc opens the
     # main menu at startup (menu_main): `menu_main; togglemenu` closes it whatever Hexen.rc did, so
@@ -225,20 +252,29 @@ function Test-VrLog([string]$path, $sc) {
         if ([math]::Abs($dYaw) -gt 5) { return "lean at D points at $leanYaw deg, expected along the body yaw $($p[3].Yaw) +- 5: $($w[3])" }
     }
     if ($sc.RoomWalk) {
-        $re = '^VR: where origin (\S+) (\S+) (\S+) yaw (\S+) lean (\S+) (\S+) view '
+        $re = '^VR: where origin (\S+) (\S+) (\S+) yaw (\S+) lean (\S+) (\S+) view (\S+) crouch (\d) held (\d+) crouchkey (\d)$'
         $w = @($vrLines | Where-Object { $_ -cmatch $re })
-        if ($w.Count -ne 2) { return "expected 2 'VR: where' lines (A, B), found $($w.Count): $($w -join ' | ')" }
+        if ($w.Count -ne 6) { return "expected 6 'VR: where' lines (A..F), found $($w.Count): $($w -join ' | ')" }
         $p = @()
         foreach ($l in $w) {
             [void]($l -cmatch $re)
             $p += ,@{ X = [double]::Parse($Matches[1], [cultureinfo]::InvariantCulture); Y = [double]::Parse($Matches[2], [cultureinfo]::InvariantCulture)
-                      LeanX = [double]::Parse($Matches[5], [cultureinfo]::InvariantCulture); LeanY = [double]::Parse($Matches[6], [cultureinfo]::InvariantCulture) }
+                      LeanX = [double]::Parse($Matches[5], [cultureinfo]::InvariantCulture); LeanY = [double]::Parse($Matches[6], [cultureinfo]::InvariantCulture)
+                      View = [double]::Parse($Matches[7], [cultureinfo]::InvariantCulture); Crouch = [int]$Matches[8]
+                      Held = [int]$Matches[9]; CrouchKey = [int]$Matches[10] }
         }
         $dist = [math]::Sqrt([math]::Pow($p[1].X - $p[0].X, 2) + [math]::Pow($p[1].Y - $p[0].Y, 2))
         $leanB = [math]::Sqrt([math]::Pow($p[1].LeanX, 2) + [math]::Pow($p[1].LeanY, 2))
         Write-Host ("vr-mock-smoke: room-scale walk A->B {0:N1} units, lean B {1:N2} units" -f $dist, $leanB)
         if ($dist -lt 20) { return "the room-scale walk moved the player only $dist units (A -> B), expected at least 20: $($w -join ' | ')" }
         if ([math]::Abs($leanB - 9.09) -gt 0.5) { return "lean $leanB units at B, expected the 9.09-unit radius +- 0.5: $($w[1])" }
+        # part 2: physical crouch (C), standing again (D), B held in the game (E) and released in the menu (F)
+        Write-Host ("vr-mock-smoke: crouch C view {0} crouch {1}, D view {2} crouch {3}, E crouchkey {4}, F held {5} crouchkey {6}" -f $p[2].View, $p[2].Crouch, $p[3].View, $p[3].Crouch, $p[4].CrouchKey, $p[5].Held, $p[5].CrouchKey)
+        if ($p[0].Crouch -ne 0 -or $p[1].Crouch -ne 0) { return "crouch reported while standing (A, B): $($w[0]) | $($w[1])" }
+        if ($p[2].Crouch -ne 1 -or $p[2].View -ge 30) { return "the head 0.8 m lower did not crouch the player (expected crouch 1, view < 30): $($w[2])" }
+        if ($p[3].Crouch -ne 0 -or $p[3].View -lt 45) { return "the head back up did not stand the player up (expected crouch 0, view >= 45): $($w[3])" }
+        if ($p[4].CrouchKey -ne 1 -or $p[4].Held -lt 1) { return "B in the game did not hold +crouch (expected crouchkey 1): $($w[4])" }
+        if ($p[5].Held -ne 0 -or $p[5].CrouchKey -ne 0) { return "B released in the menu left a key held (expected held 0, crouchkey 0): $($w[5])" }
     }
     # Expected VR: lines are the start/stop/recenter/default-bindings notices (and vr_where output); anything else is an error report.
     $bad = @($vrLines | Where-Object { $_ -cne 'VR: started (mock)' -and $_ -cne 'VR: stopped' -and $_ -cne 'VR: recentered' -and
@@ -274,6 +310,7 @@ foreach ($s in $Scenarios) {
             $runArgs = @{ Exe = $Exe; Name = "vr_$s"; Commands = $sc.Commands; ExtraArgs = (Get-VrArgs $backend)
                 GameDir = $GameDir; TimeoutSec = $TimeoutSec }
             if ($sc.WaitLines) { $runArgs.WaitLines = [int]$sc.WaitLines }
+            if ($sc.TimeoutSec -and [int]$sc.TimeoutSec -gt $TimeoutSec) { $runArgs.TimeoutSec = [int]$sc.TimeoutSec }
             if ($sc.ExpectQuit) { $runArgs.ExpectQuit = $true }
             & $runSmoke @runArgs
             if ($LASTEXITCODE -ne 0) { $why = "run-smoke failed ($LASTEXITCODE)" }
@@ -283,7 +320,7 @@ foreach ($s in $Scenarios) {
             $why = Test-VrLog $log $sc
             if ($why -and $why.StartsWith('SKIP: ')) { $skip = $true; $why = $why.Substring(6) }
         }
-        if (-not $why -and -not $sc.ExpectQuit) {   # ExpectQuit runs take no screenshot
+        if (-not $why -and (-not $sc.ExpectQuit -or $sc.Shot)) {   # ExpectQuit runs take no screenshot, unless Shot
             if ($sc.Fallback) {
                 # the flat fallback shot: a real picture (not one colour) but not a stereo pair
                 & py -I $checkShot $shot

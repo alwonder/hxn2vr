@@ -60,6 +60,11 @@ bool GlExt::load(void *(*getProc)(const char *), std::string &err) {
 	HXVR_GL(glColor4f)
 	HXVR_GL(glTexCoord2f)
 	HXVR_GL(glVertex3f)
+	HXVR_GL(glVertex2f)
+	HXVR_GL(glMatrixMode)
+	HXVR_GL(glPushMatrix)
+	HXVR_GL(glPopMatrix)
+	HXVR_GL(glLoadIdentity)
 #undef HXVR_GL
 	return true;
 }

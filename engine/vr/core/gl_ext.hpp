@@ -70,6 +70,9 @@ constexpr GLbitfield kCurrentBit = 0x00000001;
 constexpr GLbitfield kPolygonBit = 0x00000008;
 constexpr GLbitfield kEnableBit = 0x00002000;
 constexpr GLbitfield kTextureBit = 0x00040000;
+constexpr GLbitfield kTransformBit = 0x00001000;
+constexpr GLenum kModelview = 0x1700;
+constexpr GLenum kProjection = 0x1701;
 }  // namespace gl
 
 struct GlExt {
@@ -114,6 +117,11 @@ struct GlExt {
 	void (HXVR_GLAPI *glColor4f)(gl::GLfloat, gl::GLfloat, gl::GLfloat, gl::GLfloat) = nullptr;
 	void (HXVR_GLAPI *glTexCoord2f)(gl::GLfloat, gl::GLfloat) = nullptr;
 	void (HXVR_GLAPI *glVertex3f)(gl::GLfloat, gl::GLfloat, gl::GLfloat) = nullptr;
+	void (HXVR_GLAPI *glVertex2f)(gl::GLfloat, gl::GLfloat) = nullptr;
+	void (HXVR_GLAPI *glMatrixMode)(gl::GLenum) = nullptr;
+	void (HXVR_GLAPI *glPushMatrix)() = nullptr;
+	void (HXVR_GLAPI *glPopMatrix)() = nullptr;
+	void (HXVR_GLAPI *glLoadIdentity)() = nullptr;
 
 	// Resolves every entry point. On failure returns false, names the missing function in `err`
 	// and leaves the struct in an unusable (partially loaded) state.

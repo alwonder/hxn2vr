@@ -573,7 +573,7 @@ void CL_SendMove (const usercmd_t *cmd)
 		bits |= 2;
 	in_jump.state &= ~2;
 
-	if (in_crouch.state & 1)
+	if ((in_crouch.state & 1) || VRG_CrouchHeld ())	/* HXVR: physical crouch */
 		bits |= 4;
 
 	MSG_WriteByte (&buf, bits);

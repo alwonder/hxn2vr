@@ -314,10 +314,11 @@ static void VRG_Where_f (void)
 				held++;
 		}
 	}
-	/* lean: the head's room-scale lean from the feet (world units); crouch is fixed until Task 2.8 */
-	Con_Printf ("VR: where origin %.1f %.1f %.1f yaw %.1f lean %.2f %.2f view %.1f crouch 0 held %d crouchkey %d\n",
-			org[0], org[1], org[2], vrg_body_yaw, vrg_room.lean[0], vrg_room.lean[1], cl.viewheight, held,
-			in_crouch.state & 1);
+	/* lean: the head's room-scale lean from the feet (world units); crouch: the physical crouch held
+	 * (VRG_CrouchHeld); crouchkey: the +crouch button */
+	Con_Printf ("VR: where origin %.1f %.1f %.1f yaw %.1f lean %.2f %.2f view %.1f crouch %d held %d crouchkey %d\n",
+			org[0], org[1], org[2], vrg_body_yaw, vrg_room.lean[0], vrg_room.lean[1], cl.viewheight,
+			VRG_CrouchHeld () ? 1 : 0, held, in_crouch.state & 1);
 }
 
 /* ---- default bindings ---- */

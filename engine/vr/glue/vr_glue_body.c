@@ -1,7 +1,7 @@
 /*
  * vr_glue_body.c -- engine-side glue for the hxvr VR module: the player's body model (metres), the tracked
- * poses with the height offset applied, the seated mode cvars, the vr_calibrate command and the room-scale
- * lean of the head.
+ * poses with the height offset applied, the seated mode cvars, the vr_calibrate command, the room-scale
+ * lean of the head, the physical crouch and the head's collision with the world (ceiling clamp, fade in walls).
  * C, compiled into the engine; includes engine headers and vr_api.h only.
  *
  * The body is in metres of tracking space: nothing here uses vr_world_scale.
@@ -19,6 +19,8 @@ cvar_t	vr_body_shoulder_width = {"vr_body_shoulder_width", "0", CVAR_ARCHIVE};	/
 cvar_t	vr_crouch_threshold = {"vr_crouch_threshold", "0.65", CVAR_ARCHIVE};	/* fraction of vr_eye_height */
 cvar_t	vr_roomscale = {"vr_roomscale", "1", CVAR_ARCHIVE};			/* room-scale movement of the body */
 cvar_t	vr_roomscale_radius = {"vr_roomscale_radius", "0.25", CVAR_ARCHIVE};	/* metres the head leaves the body's centre */
+cvar_t	vr_crouch_physical = {"vr_crouch_physical", "1", CVAR_ARCHIVE};	/* crouching for real crouches in the game */
+cvar_t	vr_head_collision = {"vr_head_collision", "1", CVAR_ARCHIVE};	/* ceiling clamp and fade in walls */
 
 static void VRG_Calibrate_f (void);
 static void VRG_Body_f (void);
@@ -43,6 +45,8 @@ void VRG_BodyInit (void)
 	Cvar_RegisterVariable (&vr_crouch_threshold);
 	Cvar_RegisterVariable (&vr_roomscale);
 	Cvar_RegisterVariable (&vr_roomscale_radius);
+	Cvar_RegisterVariable (&vr_crouch_physical);
+	Cvar_RegisterVariable (&vr_head_collision);
 	Cmd_AddCommand ("vr_calibrate", VRG_Calibrate_f);
 	Cmd_AddCommand ("vr_body", VRG_Body_f);
 
@@ -167,12 +171,6 @@ void VRG_RoomStart (void)
 	vrg_room_model = NULL;
 }
 
-/* Scale of the eye height above the feet (game crouch). 1 until the crouch (Task 2.8). */
-float VRG_HeightScale (void)
-{
-	return 1.0f;
-}
-
 qboolean VRG_RoomWalking (void)
 {
 	return VR_IsRunning () && sv.active && cls.state == ca_connected && cls.signon == SIGNONS &&
@@ -247,6 +245,132 @@ void VRG_WriteMoveBlock (sizebuf_t *buf)
 	MSG_WriteByte (buf, clc_hxvr);
 	MSG_WriteByte (buf, n);
 	SZ_Write (buf, blk, n);
+}
+
+/* ---- physical crouch, camera height ---- */
+
+extern	kbutton_t	in_crouch;	/* cl_input.c (not in client.h) */
+
+static int		vrg_crouched;		/* VR_CrouchUpdate state (hysteresis) */
+static qboolean		vrg_crouch_rising;	/* stood up from a physical crouch, the game's view still rising */
+static float		vrg_crouch_view;	/* cl.viewheight at the previous VRG_HeightScale */
+
+/* the physical crouch counts: VR runs, vr_crouch_physical, not seated, in the running game (signed on,
+ * no demo, no intermission). Not tied to key_dest: the body stays crouched while a menu or the console is
+ * up, as a held crouch button does (a single player game does not run meanwhile anyway). */
+static qboolean VRG_CrouchGameplay (void)
+{
+	return VR_IsRunning () && vr_crouch_physical.integer && !vr_seated.integer && cls.state == ca_connected &&
+		cls.signon == SIGNONS && !cls.demoplayback && !cl.intermission;
+}
+
+/* CL_SendMove (crouch button bit) and the camera: the head's tracked height (with vr_height_offset) below
+ * the body's crouch height crouches in the game (VR_CrouchUpdate, hysteresis). Outside the running game the
+ * state is dropped. Idempotent for the same head: may run several times per frame. */
+qboolean VRG_CrouchHeld (void)
+{
+	vr_pose_t	head;
+
+	if (!VRG_CrouchGameplay ())
+	{
+		vrg_crouched = 0;
+		return false;
+	}
+	VRG_TrackedPoses (&head, NULL, NULL);
+	vrg_crouched = VR_CrouchUpdate (vrg_crouched, head.pos.y, &vrg_body);
+	return vrg_crouched != 0;
+}
+
+/* Scale of the eye height above the feet: the game's view height (cl.viewheight / 50: button crouch, death,
+ * polymorph), except while physically crouched (the real head is low already). Standing up from a physical
+ * crouch the game raises its view from 24 to 50 over a few frames; until it is up (or it goes down instead,
+ * or the crouch button takes over) the real head height still counts, so the camera does not dip. */
+float VRG_HeightScale (void)
+{
+	const qboolean	physical = VRG_CrouchHeld ();
+	const float	view = cl.viewheight;
+
+	if (physical)
+		vrg_crouch_rising = true;
+	else if (!VRG_CrouchGameplay () || (in_crouch.state & 1) || view >= 50.0f || view < vrg_crouch_view)
+		vrg_crouch_rising = false;
+	vrg_crouch_view = view;
+	return VR_CameraHeightScale (view, physical || vrg_crouch_rising);
+}
+
+/* ---- head collision with the world ---- */
+
+static float		vrg_fade;		/* 0..1, black over the eyes while the head is in a wall */
+static double		vrg_fade_time;		/* host time of the previous VRG_HeadCollide (0: none) */
+
+/* A line through the world's point hull (hull 0), initialized like SV_ClipMoveToEntity */
+static void VRG_WorldTrace (const vec3_t start, const vec3_t end, trace_t *tr)
+{
+	hull_t	*hull = &cl.worldmodel->hulls[0];
+	vec3_t	p1, p2;
+
+	VectorCopy (start, p1);
+	VectorCopy (end, p2);
+	memset (tr, 0, sizeof(*tr));
+	tr->fraction = 1;
+	tr->allsolid = true;
+	VectorCopy (end, tr->endpos);
+	SV_RecursiveHullCheck (hull, hull->firstclipnode, 0, 1, p1, p2, tr);
+}
+
+/* VRG_UpdateScreen, once per rendered frame: the head's centre cam (Quake units) is kept under the ceiling
+ * (moved down in place; *shift_z is the move to apply to both eyes, <= 0) and the fade goes toward black
+ * while the line from the body's eye to the head crosses a wall. Only with a world, vr_head_collision and
+ * not in noclip; otherwise nothing moves and the fade goes back to 0. Returns the fade alpha (0..1). */
+float VRG_HeadCollide (qboolean world, const vec3_t feet, vec3_t cam, float *shift_z)
+{
+	const double	now = Sys_DoubleTime ();
+	const float	dt = vrg_fade_time > 0 ? (float) (now - vrg_fade_time) : 0.0f;
+	float		target = 0.0f;
+	vec3_t		start, end;
+	trace_t		tr;
+
+	vrg_fade_time = now;
+	*shift_z = 0;
+	if (world && cl.worldmodel && vr_head_collision.integer && cl.v.movetype != MOVETYPE_NOCLIP)
+	{
+		/* the body's eye height, or the head's if it is lower */
+		const float	eye_z = feet[2] + q_min (cl.viewheight, cam[2] - feet[2]);
+
+		/* ceiling: from below the head up to 4 units above it */
+		start[0] = cam[0];
+		start[1] = cam[1];
+		start[2] = eye_z;
+		VectorCopy (cam, end);
+		end[2] += 4;
+		VRG_WorldTrace (start, end, &tr);
+		if (tr.fraction < 1 && !tr.startsolid)
+		{
+			const float	z = q_max (start[2], tr.endpos[2] - 4);
+
+			*shift_z = z - cam[2];
+			cam[2] = z;
+		}
+
+		/* wall: from the body's eye (over the feet) to the head */
+		start[0] = feet[0];
+		start[1] = feet[1];
+		start[2] = eye_z;
+		VRG_WorldTrace (start, cam, &tr);
+		if (tr.fraction < 1 || tr.startsolid)
+			target = 1.0f;
+	}
+	vrg_fade = VR_Approach (vrg_fade, target, 6.0f, dt);
+	return vrg_fade;
+}
+
+/* VR starts: no crouch, no fade left from a previous session */
+void VRG_CrouchStart (void)
+{
+	vrg_crouched = 0;
+	vrg_crouch_rising = false;
+	vrg_fade = 0;
+	vrg_fade_time = 0;
 }
 
 /* ---- vr_body ---- */

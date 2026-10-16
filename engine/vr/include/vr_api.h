@@ -165,6 +165,24 @@ int VR_CalibrateArm(const vr_body_t *b, const vr_pose_t *head, const vr_vec3_t *
 /* The distance VR_CalibrateArm measures, without the range check (for the "out of range" message); -1 if
  * it cannot be computed (NULL or non-finite input, head rotation not a rotation). */
 float VR_ArmDistance(const vr_body_t *b, const vr_pose_t *head, const vr_vec3_t *hand_pos, int hand);
+/* Physical crouch with hysteresis: enter when head_y < b->crouch_height, leave when
+ * head_y > b->crouch_height + 0.05 * b->eye_height; otherwise the state stays (also for a non-finite
+ * head_y). 0 for a bad body (NULL, eye_height not > 0 or crouch_height not finite). head_y: tracked,
+ * metres above the floor (with vr_height_offset). */
+int   VR_CrouchUpdate(int crouched, float head_y, const vr_body_t *b);
+
+/* Comfort (pure functions, except VR_DrawFade). */
+/* Scale of the camera height above the feet: 1 when physically crouched (the real head is already low);
+ * else clamp(viewheight / 50, 0.2, 1) (button crouch, death, polymorph: the game's view height, 50 =
+ * standing). 1 for a non-finite viewheight. */
+float VR_CameraHeightScale(float viewheight, int physical_crouch);
+/* Moves cur toward target by at most rate_per_s * dt, no overshoot. cur unchanged for a non-finite or
+ * non-positive step (dt NaN / <= 0, rate <= 0) or a non-finite target; target for a non-finite cur. */
+float VR_Approach(float cur, float target, float rate_per_s, float dt);
+/* Black over the whole bound eye at alpha (clamped to 0..1; nothing drawn at <= 0 or NaN), alpha-blended,
+ * depth test and writes off; every GL state it touches (enables, blend, depth mask, colour, matrix mode
+ * and both matrices) is restored. Call it between VR_BeginEye and VR_EndEye (no-op otherwise). */
+void  VR_DrawFade(float alpha);
 
 /* Room-scale on the client (pure functions). The head leans away from the body's centre (the feet) in world
  * axes, so turning the body does not move the head; past the radius the body should walk the excess. */

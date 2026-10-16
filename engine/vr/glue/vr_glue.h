@@ -30,6 +30,8 @@ extern	cvar_t	vr_height_offset;	/* metres, added to the y of head, eyes and hand
 extern	cvar_t	vr_body_arm_length;	/* metres, 0 = from the proportions */
 extern	cvar_t	vr_body_shoulder_width;
 extern	cvar_t	vr_crouch_threshold;	/* fraction of vr_eye_height */
+extern	cvar_t	vr_crouch_physical;	/* 1: crouching for real crouches in the game */
+extern	cvar_t	vr_head_collision;	/* 1: head kept under the ceiling, fade when it is in a wall */
 
 void VRG_Init (void);		/* Host_Init, before config.cfg/hexen.rc are executed: registers cvars */
 void VRG_Shutdown (void);	/* Host_Shutdown: stops the module if running */
@@ -72,6 +74,10 @@ void VRG_OnSetAngle (void);	/* after svc_setangle(_interpolate): body_yaw = serv
  * no demo plays, appends the block with the room-scale move walked since the last block (vrg_room_excess,
  * taken: the block consumes it; dropped instead when the server would not advance the player). */
 void VRG_WriteMoveBlock (sizebuf_t *buf);
+/* CL_SendMove: true while the player crouches for real (head below the body's crouch height, with
+ * hysteresis) in the running game (signed on, no demo, no intermission; any key_dest) with vr_crouch_physical
+ * on and vr_seated off: the crouch bit is sent. */
+qboolean VRG_CrouchHeld (void);
 /* SV_ReadClientMessage, case clc_hxvr: reads the block; its room-scale move adds to cl->hxvr_move
  * (vr_glue_server.c; sv_phys.c applies the sum on the next physics tick). */
 void VRG_ServerReadMoveBlock (client_t *cl);

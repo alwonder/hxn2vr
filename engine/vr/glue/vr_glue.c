@@ -264,6 +264,7 @@ static void VRG_Start (void)
 	vrg_body_yaw = 0;
 	vrg_body_valid = false;
 	VRG_RoomStart ();	/* also forgets the previous session's feet and world */
+	VRG_CrouchStart ();	/* no crouch, no fade */
 	vrg_recenter_pending = true;
 	vrg_panel_valid = false;
 	vrg_panel_reanchor = false;
@@ -629,7 +630,7 @@ qboolean VRG_UpdateScreen (void)
 	int		eye, numvis = 0;
 	qboolean	world, panel;
 	vec3_t		feet, save_org, save_ang, head_ang, eye_org, eye_ang, head_org, head_view;
-	float		body_yaw, upm, hscale;
+	float		body_yaw, upm, hscale, fade, shift_z;
 	float		corners[4][3];
 	vr_pose_t	head, eyes[2];
 
@@ -666,6 +667,8 @@ qboolean VRG_UpdateScreen (void)
 	VRG_RoomFrame (world, feet, &head.pos, upm);	/* the head's lean from the feet, this frame */
 	hscale = VRG_HeightScale ();
 	VR_EyeOrigin (feet, body_yaw, vrg_room.lean, &head.pos, &head.pos, upm, hscale, head_org);
+	/* once per frame at the head's centre: kept under the ceiling (both eyes move with it), fade in walls */
+	fade = VRG_HeadCollide (world, feet, head_org, &shift_z);
 	VR_TrackingToQuakeAngles (&head.rot, head_ang);
 	VR_ComposeViewAngles (body_yaw, head_ang, head_view);
 	VRG_PanelPlace (world, feet, body_yaw, upm, head_org, head_view, corners);
@@ -678,6 +681,7 @@ qboolean VRG_UpdateScreen (void)
 		{
 			VR_GetEye (eye, NULL, &vrg_eye_fov);
 			VR_EyeOrigin (feet, body_yaw, vrg_room.lean, &head.pos, &eyes[eye].pos, upm, hscale, eye_org);
+			eye_org[2] += shift_z;
 			VR_TrackingToQuakeAngles (&eyes[eye].rot, head_ang);
 			VR_ComposeViewAngles (body_yaw, head_ang, eye_ang);
 			if (world)
@@ -694,6 +698,8 @@ qboolean VRG_UpdateScreen (void)
 			{
 				VRG_ClearColor (0.05f, 0.05f, 0.05f, GL_DEPTH_BUFFER_BIT);
 			}
+			/* world, (vignette: Task 2.9), fade, panel: the menus stay visible in the dark */
+			VR_DrawFade (fade);
 			if (panel)
 				VRG_DrawPanel ((const float (*)[3]) corners, eye_org, eye_ang);
 		}
