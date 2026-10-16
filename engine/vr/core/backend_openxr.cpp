@@ -21,6 +21,7 @@
 #include "xr_logic.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -190,6 +191,12 @@ public:
 	Pose eyePose(int eye) const override { return eyePose_[eye == 0 ? 0 : 1]; }
 	Fov eyeFov(int eye) const override { return fov_[eye == 0 ? 0 : 1]; }
 	glm::ivec2 eyeSize() const override { return size_; }
+
+	BackendInfo info() const override {
+		std::string state = lost_ ? "lost" : stateName(state_);
+		for (char& ch : state) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+		return BackendInfo{"openxr", state, runtime_, format_};
+	}
 
 	unsigned acquireEye(int eye) override {
 		if (eye < 0 || eye > 1 || !renderFrame_ || eyes_[eye].acquired || lost_) return 0;
@@ -414,8 +421,10 @@ private:
 			return false;
 		}
 		XrInstanceProperties ip{XR_TYPE_INSTANCE_PROPERTIES};
-		if (XR_SUCCEEDED(call("xrGetInstanceProperties", [&] { return xrGetInstanceProperties(inst_, &ip); })))
+		if (XR_SUCCEEDED(call("xrGetInstanceProperties", [&] { return xrGetInstanceProperties(inst_, &ip); }))) {
+			runtime_ = std::string(ip.runtimeName) + " " + versionStr(ip.runtimeVersion);
 			say(std::string("OpenXR runtime \"") + ip.runtimeName + "\" " + versionStr(ip.runtimeVersion));
+		}
 		if (debugUtils) createDebugMessenger();
 		return true;
 	}
@@ -624,6 +633,7 @@ private:
 		}
 		restoreBindings(saved);
 		if (!ok) return false;
+		format_ = hexStr(fc.format) + (fc.gammaPassthrough ? " (sRGB)" : "");
 		say("OpenXR swapchain format " + hexStr(fc.format) + (fc.gammaPassthrough ? " (sRGB, gamma passthrough)" : "") +
 		    ", " + std::to_string(size_.x) + "x" + std::to_string(size_.y) + " per eye (recommended " +
 		    std::to_string(recW) + "x" + std::to_string(recH) + "), " + std::to_string(eyes_[0].images.size()) +
@@ -798,6 +808,8 @@ private:
 		running_ = lost_ = stopping_ = frameBegun_ = renderFrame_ = false;
 		eyeDone_[0] = eyeDone_[1] = false;
 		trackingWarned_ = endFrameWarned_ = false;
+		runtime_.clear();
+		format_.clear();
 		{
 			std::lock_guard<std::mutex> lock(debug_.m);
 			debug_.msgs.clear();
@@ -830,6 +842,7 @@ private:
 	bool frameBegun_ = false;   // xrBeginFrame succeeded, xrEndFrame pending
 	bool renderFrame_ = false;  // FrameInfo::render of the current frame
 	bool eyeDone_[2] = {false, false};
+	std::string runtime_, format_;   // for info(): runtime name + version, swapchain format
 	bool trackingWarned_ = false;
 	bool endFrameWarned_ = false;
 	XrTime displayTime_ = 0;

@@ -36,9 +36,25 @@ typedef struct {
 typedef struct { int render; int focused; int lost; } vr_frame_t;
 typedef struct { double acc; } vr_simclock_t;
 
+/* Snapshot for the vr_status command. All strings are NUL-terminated and empty when not applicable.
+ * stopped: running 0, state "stopped", everything else zero. state is the backend's session state
+ * (mock: "focused"; OpenXR: idle, ready, synchronized, visible, focused, stopping, lost).
+ * frames_per_s / rendered_per_s: VR_BeginFrame calls / frames with render != 0 per second over the
+ * last full one-second window (0 when no frame came for 2 s). */
+typedef struct {
+	int   running;
+	char  backend[16];
+	char  state[24];
+	char  runtime[96];
+	char  format[48];
+	int   eye_w, eye_h;
+	float frames_per_s, rendered_per_s;
+} vr_status_t;
+
 int  VR_Start(const vr_host_t *host, const vr_start_params_t *p, char *err, int errlen);
 void VR_Stop(void);
 int  VR_IsRunning(void);
+void VR_GetStatus(vr_status_t *out);   /* out may be NULL (no-op) */
 int  VR_BeginFrame(vr_frame_t *out);
 void VR_GetHeadPose(vr_pose_t *out);
 void VR_GetEye(int eye, vr_pose_t *pose, vr_fov_t *fov);

@@ -16,6 +16,13 @@ struct Pose { glm::vec3 pos; glm::quat rot; };   // metres, OpenXR axes, relativ
 struct Fov { float left, right, up, down; };      // radians, left/down < 0
 struct FrameInfo { bool render; bool focused; bool lost; };
 struct StartParams { float renderScale; float eyeHeightM; bool mockMotion; float mockHz; };
+// Human-readable facts about the running backend, for vr_status. Plain strings; empty = not applicable.
+struct BackendInfo {
+	std::string name;              // "mock" / "openxr"
+	std::string state;             // session state, lower case: idle, ready, synchronized, visible, focused, stopping, lost
+	std::string runtime;           // runtime name and version (OpenXR); empty for the mock
+	std::string swapchainFormat;   // colour format of the eye images
+};
 
 // Contract (the caller, vr_module.cpp, guarantees it; backends may rely on it):
 //  - Per frame: beginFrame -> [acquireEye/releaseEye for each eye, only if FrameInfo::render]
@@ -34,6 +41,8 @@ struct StartParams { float renderScale; float eyeHeightM; bool mockMotion; float
 //    whose poses are not valid is reported as render = false and submits no layer). The glue
 //    auto-recenters on the first rendered frame and relies on this. Without a rendered frame yet,
 //    headPose() is identity at (0, eyeHeightM, 0); otherwise the last valid pose.
+//  - FrameInfo::lost == true means the session is unusable: the caller stops the backend (it does not
+//    throttle: beginFrame keeps reporting lost, without sleeping, until stop()).
 //  - eyeSize() is fixed between start() and stop(). acquireEye() may return a different texture
 //    name every frame (OpenXR swapchains rotate 2-3 images per eye).
 class Backend {
@@ -50,6 +59,9 @@ public:
 	virtual unsigned acquireEye(int eye) = 0;   // GL texture name for this frame; 0 if none
 	virtual void releaseEye(int eye) = 0;
 	virtual void endFrame() = 0;
+	// Additive (not part of the frame contract): facts for vr_status. May be called any time between
+	// start() and stop(); never touches GL or the runtime.
+	virtual BackendInfo info() const { return {}; }
 };
 
 // Fake headset. `GlExt` may be null (tests): the mock then never touches GL and acquireEye returns 0.

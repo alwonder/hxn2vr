@@ -31,6 +31,7 @@
 #include "cdaudio.h"
 #include "resource.h"
 #include "wgl_func.h"
+#include "vr_glue.h"	/* HXVR */
 
 #define WARP_WIDTH		320
 #define WARP_HEIGHT		200
@@ -2106,6 +2107,9 @@ static void VID_ChangeVideoMode (int newmode)
 	// restore gamma
 	if (maindc && gammaworks && SetDeviceGammaRamp_f)
 		SetDeviceGammaRamp_f(maindc, orig_ramps);
+	/* HXVR: VR objects live in the GL context deleted below: stop VR while it is still current */
+	VRG_BeforeVideoRestart ();
+
 	CDAudio_Pause ();
 	BGM_Pause ();
 	S_ClearBuffer ();
@@ -2205,6 +2209,7 @@ static void VID_ChangeVideoMode (int newmode)
 	// apply our gamma
 	VID_ShiftPalette(NULL);
 	vid_canalttab = temp2;
+	VRG_AfterVideoRestart ();	/* HXVR: new context and textures are ready: start VR again if it ran */
 }
 
 static void VID_Restart_f (void)

@@ -22,6 +22,8 @@ extern	cvar_t	vr_debug_ticks;
 
 void VRG_Init (void);		/* Host_Init, before config.cfg/hexen.rc are executed: registers cvars */
 void VRG_Shutdown (void);	/* Host_Shutdown: stops the module if running */
+void VRG_BeforeVideoRestart (void);	/* VID_ChangeVideoMode, before the GL context is deleted: stops VR (remembers it ran) */
+void VRG_AfterVideoRestart (void);	/* ... after the new context and textures are ready: starts VR again if it ran */
 qboolean VRG_Active (void);	/* true while VR rendering is active: running and last frame had render != 0 */
 qboolean VRG_SimActive (void);	/* true while the VR session is running (fixed-tick server; also when not rendering) */
 

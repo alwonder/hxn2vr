@@ -175,7 +175,7 @@ TEST_CASE("C API restart after stop and double start") {
 	CHECK(VR_IsRunning() == 0);
 }
 
-TEST_CASE("C API OpenXR backend is not available yet") {
+TEST_CASE("C API OpenXR backend fails to start without GL entry points") {
 	char err[128] = "";
 	const vr_start_params_t p = c_params(VR_BACKEND_OPENXR);
 	CHECK(VR_Start(nullptr, &p, err, sizeof err) == 0);
@@ -204,12 +204,13 @@ int g_prints = 0;
 void count_print(const char*) { ++g_prints; }
 }  // namespace
 
-TEST_CASE("C API failure is reported through host print when provided") {
+TEST_CASE("C API failure is reported through err only, not also through host print") {
 	vr_host_t host{};
 	host.print = count_print;
 	g_prints = 0;
 	char err[64];
 	const vr_start_params_t p = c_params(VR_BACKEND_OPENXR);
 	CHECK(VR_Start(&host, &p, err, sizeof err) == 0);
-	CHECK(g_prints == 1);
+	CHECK(g_prints == 0);   // the caller prints err (once); the module must not duplicate it
+	CHECK(std::strlen(err) > 0);
 }

@@ -52,6 +52,7 @@ add_executable(vr_tests
     ${CMAKE_SOURCE_DIR}/tests/vr/test_view.cpp
     ${CMAKE_SOURCE_DIR}/tests/vr/test_panel.cpp
     ${CMAKE_SOURCE_DIR}/tests/vr/test_xr_logic.cpp
+    ${CMAKE_SOURCE_DIR}/tests/vr/test_lifecycle.cpp
 )
 target_compile_features(vr_tests PRIVATE cxx_std_20)
 set_target_properties(vr_tests PROPERTIES CXX_EXTENSIONS OFF MSVC_RUNTIME_LIBRARY "${HXVR_MSVC_RUNTIME}")

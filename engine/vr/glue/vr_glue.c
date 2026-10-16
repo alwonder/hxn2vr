@@ -22,6 +22,7 @@ cvar_t	vr_mock_hz = {"vr_mock_hz", "90", CVAR_NONE};
 cvar_t	vr_debug_ticks = {"vr_debug_ticks", "0", CVAR_NONE};
 
 static void VRG_Recenter_f (void);
+static void VRG_Status_f (void);
 static void VRG_Recenter (void);
 
 void VRG_Init (void)
@@ -39,6 +40,7 @@ void VRG_Init (void)
 	Cvar_RegisterVariable (&vr_mock_hz);
 	Cvar_RegisterVariable (&vr_debug_ticks);
 	Cmd_AddCommand ("vr_recenter", VRG_Recenter_f);
+	Cmd_AddCommand ("vr_status", VRG_Status_f);
 }
 
 /* ---- VR session state ---- */
@@ -81,6 +83,14 @@ static qboolean		vrg_swap_saved;
 static int		vrg_swap_interval;
 static int		vrg_dbg_frames, vrg_dbg_ticks;
 static double		vrg_dbg_start;
+
+/* server ticks per second over the last full one-second window (vr_status) */
+static double		vrg_tick_start, vrg_tick_last;
+static int		vrg_tick_count;
+static float		vrg_ticks_per_s;
+
+/* VR was running when the video mode was being changed (vid_restart): start it again afterwards */
+static qboolean		vrg_restart_wanted;
 
 /* Module messages can arrive mid-frame (e.g. from VR_BeginEye): Con_Printf may re-enter
  * SCR_UpdateScreen while cls.signon != SIGNONS, so only safe prints here. */
@@ -202,6 +212,9 @@ static void VRG_Start (void)
 	vrg_in_update = false;
 	vrg_dbg_frames = vrg_dbg_ticks = 0;
 	vrg_dbg_start = Sys_DoubleTime ();
+	vrg_tick_start = vrg_tick_last = Sys_DoubleTime ();
+	vrg_tick_count = 0;
+	vrg_ticks_per_s = 0;
 	vrg_frame_pending = false;
 	VRG_SaveSwapInterval ();
 	Con_Printf ("VR: started (%s)\n", bname);
@@ -249,6 +262,15 @@ qboolean VRG_HostFrameBegin (void)
 	vrg_active = false;
 	if (VR_IsRunning() && VR_BeginFrame(&vrg_frame))
 	{
+		if (vrg_frame.lost)
+		{
+			/* the headset session is gone (runtime quit, device removed...): back to the flat view.
+			 * The backend reports lost on every frame until stopped, so stop on the first one. */
+			Con_Printf ("VR: session lost, continuing in the flat view\n");
+			VRG_Stop ();		/* VR_Stop ends the frame VR_BeginFrame left pending */
+			Cvar_Set ("vr_enabled", "0");
+			return false;
+		}
 		vrg_frame_pending = true;
 		vrg_active = (vrg_frame.render != 0);
 		if (vrg_active && vrg_recenter_pending)
@@ -278,7 +300,16 @@ int VRG_ServerTicks (double dt)
 	/* the server only advances while the headset is rendering and focused */
 	const int paused = !(vrg_frame.focused && vrg_frame.render);
 	const int n = VR_SimTicks (&vrg_simclock, dt, paused);
+	const double now = Sys_DoubleTime ();
 	vrg_dbg_ticks += n;
+	if (now - vrg_tick_start >= 1.0)
+	{
+		vrg_ticks_per_s = (float) (vrg_tick_count / (now - vrg_tick_start));
+		vrg_tick_start = now;
+		vrg_tick_count = 0;
+	}
+	vrg_tick_count += n;
+	vrg_tick_last = now;
 	return n;
 }
 
@@ -609,4 +640,46 @@ qboolean VRG_UpdateScreen (void)
 	V_UpdatePalette ();	/* cshift decay and gamma, as in the flat path */
 	GL_EndRendering ();
 	return true;
+}
+
+/* ---- vid_restart, vr_status ---- */
+
+/* VID_ChangeVideoMode deletes the GL context: every GL object of the module (eye and panel
+ * targets, mock eye textures, the OpenXR session bound to the context) dies with it. Stop VR while
+ * the old context is still current so the module deletes its objects properly. */
+void VRG_BeforeVideoRestart (void)
+{
+	vrg_restart_wanted = (VR_IsRunning() != 0);
+	if (vrg_restart_wanted)
+		VRG_Stop ();
+}
+
+/* The new context is current and the engine's textures are reloaded: start VR again through the
+ * normal path (which also re-saves and re-applies the window's swap interval). */
+void VRG_AfterVideoRestart (void)
+{
+	if (!vrg_restart_wanted)
+		return;
+	vrg_restart_wanted = false;
+	if (vr_enabled.integer && !VR_IsRunning())
+		VRG_Start ();
+}
+
+static void VRG_Status_f (void)
+{
+	vr_status_t	st;
+	const double	now = Sys_DoubleTime ();
+
+	VR_GetStatus (&st);
+	if (!st.running)
+	{
+		Con_Printf ("VR: stopped (vr_enabled %d, vr_backend %s)\n", vr_enabled.integer, vr_backend.string);
+		return;
+	}
+	Con_Printf ("VR: backend %s, session %s\n", st.backend, st.state);
+	if (st.runtime[0])
+		Con_Printf ("VR: runtime %s\n", st.runtime);
+	Con_Printf ("VR: eye %dx%d, swapchain format %s\n", st.eye_w, st.eye_h, st.format[0] ? st.format : "n/a");
+	Con_Printf ("VR: %.1f frames/s (%.1f rendered), %.1f server ticks/s\n", st.frames_per_s, st.rendered_per_s,
+			(now - vrg_tick_last < 2.0) ? vrg_ticks_per_s : 0.0f);
 }

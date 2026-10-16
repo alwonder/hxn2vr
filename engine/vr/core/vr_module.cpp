@@ -7,9 +7,18 @@
 #include "targets.hpp"
 #include "vr_module_testing.hpp"
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>   // wglGetCurrentContext: never delete GL objects of a dead context
+
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -33,6 +42,22 @@ bool g_eyeBound[2] = {false, false};
 bool g_warnedTargets = false;
 bool g_warnedPanel = false;
 
+// GL context current at VR_Start: every GL object the module owns belongs to it. If it is gone (or
+// another one is current) when the objects are released, they are leaked instead of deleted.
+HGLRC g_ctx = nullptr;
+
+// Frame-rate statistics for vr_status: counts per one-second window, last full window published.
+double g_winStart = 0.0;
+double g_lastFrame = 0.0;
+int g_winFrames = 0;
+int g_winRendered = 0;
+float g_fps = 0.0f;
+float g_renderedFps = 0.0f;
+bool g_statsStarted = false;
+
+// Test hook (vr_module_testing.hpp): builds the backend instead of makeMockBackend / makeOpenXrBackend.
+std::function<std::unique_ptr<hxvr::Backend>(vr_backend_kind_t)> g_testFactory;
+
 // Copies msg into err, truncating to errlen and always NUL-terminating (when errlen > 0).
 void set_error(char *err, int errlen, const std::string &msg) {
 	if (!err || errlen <= 0) return;
@@ -41,9 +66,9 @@ void set_error(char *err, int errlen, const std::string &msg) {
 	err[n] = '\0';
 }
 
+// VR_Start failures are reported through `err` only: the caller prints it (once).
 bool fail(char *err, int errlen, const std::string &msg) {
 	set_error(err, errlen, msg);
-	if (g_host.print) g_host.print(msg.c_str());
 	return false;
 }
 
@@ -60,6 +85,61 @@ vr_pose_t to_c(const hxvr::Pose &p) {
 void print(const std::string &msg) {
 	if (g_host.print) g_host.print(msg.c_str());
 }
+
+void reset_stats() {
+	g_winStart = g_lastFrame = 0.0;
+	g_winFrames = g_winRendered = 0;
+	g_fps = g_renderedFps = 0.0f;
+	g_statsStarted = false;
+}
+
+void count_frame(double now, bool rendered) {
+	if (!g_statsStarted) {
+		g_statsStarted = true;
+		g_winStart = now;
+	} else if (now - g_winStart >= 1.0) {
+		const double span = now - g_winStart;
+		g_fps = static_cast<float>(g_winFrames / span);
+		g_renderedFps = static_cast<float>(g_winRendered / span);
+		g_winStart = now;
+		g_winFrames = g_winRendered = 0;
+	}
+	++g_winFrames;
+	if (rendered) ++g_winRendered;
+	g_lastFrame = now;
+}
+
+void copy_str(char *dst, std::size_t cap, const std::string &s) {
+	const std::size_t n = std::min(s.size(), cap - 1);
+	std::memcpy(dst, s.data(), n);
+	dst[n] = '\0';
+}
+
+// Eye and panel targets (and a backend that owns GL objects) belong to the context that was current
+// at VR_Start. glDelete* on names of another context would delete someone else's objects: when that
+// context is not current any more, the module-owned targets are leaked (the context is gone with them).
+bool gl_context_is_ours() { return g_ctx == wglGetCurrentContext(); }
+
+void release_targets() {
+	if (!gl_context_is_ours()) {
+		(void)g_panel.release();
+		(void)g_targets.release();
+		return;
+	}
+	g_panel.reset();
+	g_targets.reset();
+}
+
+// Static destruction (process exit, e.g. after Sys_Error) must not touch GL if the context is gone.
+struct ExitGuard {
+	~ExitGuard() {
+		if (!gl_context_is_ours()) {
+			(void)g_panel.release();
+			(void)g_targets.release();
+			(void)g_backend.release();
+		}
+	}
+} g_exitGuard;
 
 // Releases any acquired eye (unbinding its FBO first) and ends the pending frame.
 void finish_frame() {
@@ -104,7 +184,9 @@ int  VR_Start(const vr_host_t *host, const vr_start_params_t *p, char *err, int 
 
 	const hxvr::StartParams sp{p->render_scale, p->eye_height_m, p->mock_motion != 0, p->mock_hz};
 	std::unique_ptr<hxvr::Backend> backend;
-	switch (p->backend) {
+	if (g_testFactory) {
+		backend = g_testFactory(p->backend);
+	} else switch (p->backend) {
 	case VR_BACKEND_MOCK:
 		backend = hxvr::makeMockBackend(gl);
 		break;
@@ -122,6 +204,7 @@ int  VR_Start(const vr_host_t *host, const vr_start_params_t *p, char *err, int 
 		return 0;
 	}
 	g_backend = std::move(backend);
+	g_ctx = wglGetCurrentContext();
 	if (gl) {
 		g_targets = std::make_unique<hxvr::EyeTargets>(gl);
 		g_panel = std::make_unique<hxvr::PanelTarget>(gl);
@@ -129,6 +212,7 @@ int  VR_Start(const vr_host_t *host, const vr_start_params_t *p, char *err, int 
 	g_framePending = false;
 	g_warnedTargets = false;
 	g_warnedPanel = false;
+	reset_stats();
 	return 1;
 }
 void VR_Stop(void) {
@@ -137,17 +221,42 @@ void VR_Stop(void) {
 		g_backend->stop();
 		g_backend.reset();
 	}
-	g_panel.reset();
-	g_targets.reset();   // GL context is still current (VR stops before the window goes away)
+	release_targets();   // the GL context is still current: VR stops before the window / context goes away
 	g_framePending = false;
 	g_frameRender = false;
+	for (int eye = 0; eye < 2; ++eye) g_eyeAcquired[eye] = g_eyeBound[eye] = false;
+	g_warnedTargets = false;
+	g_warnedPanel = false;
+	g_ctx = nullptr;
+	reset_stats();
 }
 int  VR_IsRunning(void) { return g_backend ? 1 : 0; }
+void VR_GetStatus(vr_status_t *out) {
+	if (!out) return;
+	*out = vr_status_t{};
+	copy_str(out->state, sizeof out->state, "stopped");
+	if (!g_backend) return;
+	const hxvr::BackendInfo info = g_backend->info();
+	const glm::ivec2 size = g_backend->eyeSize();
+	out->running = 1;
+	copy_str(out->backend, sizeof out->backend, info.name);
+	copy_str(out->state, sizeof out->state, info.state);
+	copy_str(out->runtime, sizeof out->runtime, info.runtime);
+	copy_str(out->format, sizeof out->format, info.swapchainFormat);
+	out->eye_w = size.x;
+	out->eye_h = size.y;
+	if (host_time() - g_lastFrame < 2.0) {
+		out->frames_per_s = g_fps;
+		out->rendered_per_s = g_renderedFps;
+	}
+}
 int  VR_BeginFrame(vr_frame_t *out) {
 	if (out) { out->render = 0; out->focused = 0; out->lost = 0; }
 	if (!g_backend) return 0;
 	finish_frame();   // a frame left pending (longjmp, or the screen was not drawn) ends first
-	const hxvr::FrameInfo fi = g_backend->beginFrame(host_time());
+	const double now = host_time();
+	const hxvr::FrameInfo fi = g_backend->beginFrame(now);
+	count_frame(now, fi.render);
 	g_framePending = true;
 	g_frameRender = fi.render;
 	if (out) { out->render = fi.render; out->focused = fi.focused; out->lost = fi.lost; }
@@ -222,4 +331,10 @@ void VR_TestInjectBackend(std::unique_ptr<hxvr::Backend> backend) {
 	g_backend = std::move(backend);
 	g_framePending = false;
 	g_frameRender = false;
+	g_ctx = wglGetCurrentContext();
+	reset_stats();
+}
+
+void VR_TestSetBackendFactory(std::function<std::unique_ptr<hxvr::Backend>(vr_backend_kind_t)> factory) {
+	g_testFactory = std::move(factory);
 }

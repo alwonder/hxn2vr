@@ -52,6 +52,9 @@ public:
 	unsigned acquireEye(int eye) override { return tex_[eye == 0 ? 0 : 1]; }
 	void releaseEye(int) override {}
 	void endFrame() override {}
+	BackendInfo info() const override {
+		return BackendInfo{"mock", "focused", "", gl_ ? "GL_RGBA8 (0x8058)" : "none (no GL)"};
+	}
 
 private:
 	static int scaled(int base, float scale) { return static_cast<int>(std::lround(base * scale)); }

@@ -9,6 +9,11 @@
     b  map demo1, changelevel demo2    -> check_shot.py --stereo
     c  no map (console only)           -> check_shot.py (not flat): the console is drawn into the 2D
        panel; without the panel the eyes would be a uniform clear colour.
+    d  map demo1, vid_restart          -> check_shot.py --stereo: VR stops before the GL context is deleted
+       and starts again on the new one (log: started, stopped, started again, no error line).
+    e  vr_backend openxr, map demo1    -> flat fallback: no headset session can start, so the log has a
+       `VR:` failure line, vr_enabled is reset to 0 and the screenshot is mono (check_shot passes,
+       check_shot --stereo rejects it). SKIPPED if an OpenXR session does start (headset connected).
 
   check_shot --stereo alone cannot prove VR ran, so every run also uses -condebug and the
   console log must contain `VR: started (mock)` and no `VR:` error line (`VR: recentered` is allowed;
@@ -28,13 +33,12 @@
 [CmdletBinding()]
 param(
     [string]$Exe = 'build/win64/Debug/hxn2vr.exe',
-    [string[]]$Scenarios = @('a', 'b', 'c'),
+    [string[]]$Scenarios = @('a', 'b', 'c', 'd', 'e'),
     [string]$GameDir = 'build/game',
     [switch]$IncludePending,
     [int]$TimeoutSec = 180,
     [string[]]$ExtraArgs = @()   # appended to the VR engine arguments, e.g. +vr_mock_motion 1
 )
-
 $ErrorActionPreference = 'Stop'
 # `-File ... -Scenarios a,b` arrives as the single string "a,b"
 $Scenarios = @($Scenarios | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -54,20 +58,48 @@ $log = Join-Path $GameDir 'debug_h2.log'
 $config = Join-Path $GameDir 'data1\config.cfg'
 
 # Placed before +exec by run-smoke, so they run before the scripted commands.
-$vrArgs = @('-condebug', '+vr_backend', 'mock', '+vr_mirror', '2', '+vr_enabled', '1') + @($ExtraArgs | ForEach-Object { $_ -split ' ' } | Where-Object { $_ })
+function Get-VrArgs([string]$backend) {
+    @('-condebug', '+vr_backend', $backend, '+vr_mirror', '2', '+vr_enabled', '1') + @($ExtraArgs | ForEach-Object { $_ -split ' ' } | Where-Object { $_ })
+}
 
 $all = [ordered]@{
     a = @{ Commands = @('map demo1'); Stereo = $true; Pending = $false; Recenter = $true }   # auto-recenter must have run
     b = @{ Commands = @('map demo1', 'changelevel demo2'); Stereo = $true; Pending = $false }
     c = @{ Commands = @('echo vr-mock-smoke: console only'); Stereo = $false; Pending = $false }   # 2D panel with no world
+    # vid_restart deletes the GL context: VR must stop before, start again after (2 starts, 1 stop)
+    d = @{ Commands = @('map demo1', 'vid_restart'); Stereo = $true; Pending = $false; Restarts = 1 }
+    # no headset: the OpenXR session cannot start, the game falls back to the flat view
+    e = @{ Commands = @('map demo1', 'vr_enabled', 'vr_status'); Backend = 'openxr'; Fallback = $true; Pending = $false }
 }
 
-function Test-VrLog([string]$path, [bool]$requireRecenter) {
+# Returns $null if the log is right, 'SKIP: ...' if the scenario cannot run here, else the failure text.
+function Test-VrLog([string]$path, $sc) {
     if (-not (Test-Path -LiteralPath $path)) { return "no console log at $path" }
+    $lines = @(Get-Content -LiteralPath $path)
     # case-sensitive: vr_debug_ticks prints lowercase "vr:" statistics lines
-    $vrLines = @(Get-Content -LiteralPath $path | Where-Object { $_ -cmatch '^VR:' })
-    if (-not ($vrLines -contains 'VR: started (mock)')) { return "log has no 'VR: started (mock)' line" }
-    if ($requireRecenter -and -not ($vrLines -ccontains 'VR: recentered')) { return "log has no 'VR: recentered' line (auto-recenter did not run)" }
+    $vrLines = @($lines | Where-Object { $_ -cmatch '^VR:' })
+    if ($sc.Fallback) {
+        if ($vrLines -ccontains 'VR: started (openxr)') {
+            return 'SKIP: an OpenXR session started (headset / runtime available), the no-headset fallback cannot be tested'
+        }
+        if ($vrLines.Count -eq 0) { return "log has no 'VR:' line describing the failure" }
+        # a failure line: anything but the informational runtime line and the stop notices
+        if (-not ($vrLines | Where-Object { $_ -cnotmatch '^VR: (OpenXR runtime |recentered|started)' -and $_ -cnotmatch '^VR: stopped' })) {
+            return "log has VR: lines but none describes a failure: $($vrLines -join ' | ')"
+        }
+        if (-not ($lines -ccontains '"vr_enabled" is "0"')) { return 'vr_enabled was not reset to 0 after the failed start' }
+        if (-not ($vrLines | Where-Object { $_ -cmatch '^VR: stopped \(vr_enabled 0' })) { return "vr_status did not report 'stopped (vr_enabled 0'" }
+        return $null
+    }
+    $startedCount = @($vrLines | Where-Object { $_ -ceq 'VR: started (mock)' }).Count
+    $stoppedCount = @($vrLines | Where-Object { $_ -ceq 'VR: stopped' }).Count
+    if ($startedCount -lt 1) { return "log has no 'VR: started (mock)' line" }
+    if ($sc.Restarts) {
+        $wantStarts = 1 + [int]$sc.Restarts
+        if ($startedCount -ne $wantStarts) { return "expected $wantStarts 'VR: started (mock)' lines (start + restart), found $startedCount" }
+        if ($stoppedCount -ne [int]$sc.Restarts) { return "expected $($sc.Restarts) 'VR: stopped' line(s) (before the video restart), found $stoppedCount" }
+    }
+    if ($sc.Recenter -and -not ($vrLines -ccontains 'VR: recentered')) { return "log has no 'VR: recentered' line (auto-recenter did not run)" }
     # Expected VR: lines are the start/stop/recenter notices; anything else is an error report.
     $bad = @($vrLines | Where-Object { $_ -cne 'VR: started (mock)' -and $_ -cne 'VR: stopped' -and $_ -cne 'VR: recentered' })
     if ($bad.Count) { return "log has VR error line(s): $($bad -join ' | ')" }
@@ -77,7 +109,7 @@ function Test-VrLog([string]$path, [bool]$requireRecenter) {
 $failed = @()
 $results = @()
 foreach ($s in $Scenarios) {
-    if (-not $all.Contains($s)) { throw "unknown scenario '$s' (a, b, c)" }
+    if (-not $all.Contains($s)) { throw "unknown scenario '$s' (a, b, c, d, e)" }
     $sc = $all[$s]
     if ($sc.Pending -and -not $IncludePending) {
         Write-Host "vr-mock-smoke ($s): PENDING (skipped; -IncludePending to run)"
@@ -85,6 +117,7 @@ foreach ($s in $Scenarios) {
         continue
     }
     Write-Host "vr-mock-smoke ($s): $($sc.Commands -join '; ')"
+    $backend = if ($sc.Backend) { $sc.Backend } else { 'mock' }
 
     if (Test-Path -LiteralPath $log) { Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue }
     if (Test-Path -LiteralPath $log) { throw "cannot remove stale $log (engine still running?)" }
@@ -93,19 +126,35 @@ foreach ($s in $Scenarios) {
         $cfgBackup = [System.IO.File]::ReadAllBytes($config)
     }
     $why = $null
+    $skip = $false
     try {
         try {
-            & $runSmoke -Exe $Exe -Name "vr_$s" -Commands $sc.Commands -ExtraArgs $vrArgs `
+            & $runSmoke -Exe $Exe -Name "vr_$s" -Commands $sc.Commands -ExtraArgs (Get-VrArgs $backend) `
                 -GameDir $GameDir -TimeoutSec $TimeoutSec
             if ($LASTEXITCODE -ne 0) { $why = "run-smoke failed ($LASTEXITCODE)" }
         }
         catch { $why = "run-smoke error: $_" }
-        if (-not $why) { $why = Test-VrLog $log ([bool]$sc.Recenter) }
         if (-not $why) {
-            $shotArgs = @('-I', $checkShot, $shot)
-            if ($sc.Stereo) { $shotArgs += '--stereo' }
-            & py @shotArgs
-            if ($LASTEXITCODE -ne 0) { $why = "check_shot failed ($LASTEXITCODE)" }
+            $why = Test-VrLog $log $sc
+            if ($why -and $why.StartsWith('SKIP: ')) { $skip = $true; $why = $why.Substring(6) }
+        }
+        if (-not $why) {
+            if ($sc.Fallback) {
+                # the flat fallback shot: a real picture (not one colour) but not a stereo pair
+                & py -I $checkShot $shot
+                if ($LASTEXITCODE -ne 0) { $why = "check_shot rejected the flat fallback screenshot ($LASTEXITCODE)" }
+                if (-not $why) {
+                    & py -I $checkShot $shot --stereo
+                    if ($LASTEXITCODE -eq 0) { $why = 'check_shot --stereo accepted the screenshot: the fallback is not mono' }
+                    else { Write-Host 'vr-mock-smoke: (the --stereo rejection above is expected: the shot is mono)' }
+                }
+            }
+            else {
+                $shotArgs = @('-I', $checkShot, $shot)
+                if ($sc.Stereo) { $shotArgs += '--stereo' }
+                & py @shotArgs
+                if ($LASTEXITCODE -ne 0) { $why = "check_shot failed ($LASTEXITCODE)" }
+            }
         }
     }
     finally {
@@ -119,7 +168,11 @@ foreach ($s in $Scenarios) {
         Remove-Item -LiteralPath (Join-Path $GameDir "data1\smoke_vr_$s.cfg") -Force -ErrorAction SilentlyContinue
     }
 
-    if ($why) {
+    if ($skip) {
+        Write-Host "vr-mock-smoke ($s): SKIPPED - $why"
+        $results += "${s}: SKIPPED"
+    }
+    elseif ($why) {
         $tag = if ($sc.Pending) { 'FAIL (pending, expected until Task 1.8)' } else { 'FAIL' }
         Write-Host "vr-mock-smoke ($s): $tag - $why"
         $results += "${s}: $tag"
