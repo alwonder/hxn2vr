@@ -53,5 +53,6 @@ void VRG_OnSetAngle (void);	/* after svc_setangle(_interpolate): body_yaw = serv
 /* Implemented by the video driver (gl_vidnt.c): blocks sound while the window is unfocused, except
  * while a VR session runs. The glue calls it when VR starts / stops. */
 void VID_VRSoundFocus (void);
+void VID_VRSoundInit (void);	/* once, right after S_Init: block sound if unfocused and no VR */
 
 #endif /* HXVR_VR_GLUE_H */

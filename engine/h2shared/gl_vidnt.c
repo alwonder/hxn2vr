@@ -1503,6 +1503,17 @@ void VID_VRSoundFocus (void)
 		sound_active = true;
 	}
 }
+
+/* Called once right after S_Init(). The DirectSound buffer is DSBCAPS_GLOBALFOCUS, so the driver no
+ * longer mutes it when the window never gets focus (launched in the background): resync sound_active
+ * with the fresh S_Init state (snd_blocked == 0, i.e. unblocked; AppActivate calls made before the
+ * sound was up could not block anything) and apply the focus rule now. A later AppActivate(true)
+ * balances this with S_UnblockSound (snd_blocked is a counter, one block <-> one unblock). */
+void VID_VRSoundInit (void)
+{
+	sound_active = true;
+	VID_VRSoundFocus ();
+}
 /* HXVR end */
 
 static void AppActivate (BOOL fActive, BOOL minimize)

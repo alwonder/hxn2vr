@@ -1065,6 +1065,7 @@ void Host_Init (void)
 		Sbar_Init();
 
 		S_Init ();
+		VID_VRSoundInit ();	/* HXVR: mute now if the window is unfocused (the DS buffer is GLOBALFOCUS) */
 		CDAudio_Init();
 		MIDI_Init();
 		BGM_Init();
