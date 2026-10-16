@@ -88,16 +88,17 @@ void VR_TrackingToQuakeAngles(const vr_quat_t *qin, float out[3]) {
 	out[2] = roll;
 }
 
-void VR_EyeOrigin(const float feet[3], float body_yaw, const vr_vec3_t *eye_pos,
-                  const vr_vec3_t *anchor, float upm, float out[3]) {
-	// Horizontal: (eye - anchor) in x,z -> Quake axes, rotated by the body yaw, scaled.
-	const glm::vec3 d = quake_from_tracking(glm::vec3(eye_pos->x - anchor->x, 0.0f, eye_pos->z - anchor->z));
+void VR_EyeOrigin(const float feet[3], float body_yaw, const float lean[2], const vr_vec3_t *head_pos,
+                  const vr_vec3_t *eye_pos, float upm, float height_scale, float out[3]) {
+	// Horizontal: the head stands at feet + lean (world axes); the eye's offset from the head (x,z) ->
+	// Quake axes, rotated by the body yaw, scaled.
+	const glm::vec3 d = quake_from_tracking(glm::vec3(eye_pos->x - head_pos->x, 0.0f, eye_pos->z - head_pos->z));
 	const float a = body_yaw * (3.14159265358979323846f / 180.0f);
 	const float c = std::cos(a), s = std::sin(a);
-	out[0] = feet[0] + (d.x * c - d.y * s) * upm;
-	out[1] = feet[1] + (d.x * s + d.y * c) * upm;
-	// Vertical: absolute eye height above the floor (anchor.y ignored).
-	out[2] = feet[2] + eye_pos->y * upm;
+	out[0] = feet[0] + lean[0] + (d.x * c - d.y * s) * upm;
+	out[1] = feet[1] + lean[1] + (d.x * s + d.y * c) * upm;
+	// Vertical: absolute eye height above the floor (head_pos.y ignored), scaled (game crouch).
+	out[2] = feet[2] + eye_pos->y * upm * height_scale;
 }
 
 // Column-major, equivalent to glFrustum(tan(l)*n, tan(r)*n, tan(d)*n, tan(u)*n, n, f).

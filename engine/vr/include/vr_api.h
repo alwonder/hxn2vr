@@ -166,12 +166,29 @@ int VR_CalibrateArm(const vr_body_t *b, const vr_pose_t *head, const vr_vec3_t *
  * it cannot be computed (NULL or non-finite input, head rotation not a rotation). */
 float VR_ArmDistance(const vr_body_t *b, const vr_pose_t *head, const vr_vec3_t *hand_pos, int hand);
 
+/* Room-scale on the client (pure functions). The head leans away from the body's centre (the feet) in world
+ * axes, so turning the body does not move the head; past the radius the body should walk the excess. */
+typedef struct { float lean[2]; vr_vec3_t last_head; int has_last; } vr_room_t;   /* lean: Quake units, world x/y */
+void VR_RoomReset(vr_room_t *r);   /* lean 0, forget the last head */
+/* Integrates the head's horizontal motion since the previous call (tracking metres, rotated by body_yaw,
+ * * upm) into the lean; a step longer than 0.5 m is not a step (tracking jump). Past radius_units the
+ * excess goes to out_excess[2] (world units; the body should walk it) and the lean keeps radius_units.
+ * out_excess is set on every call ((0,0) when there is none). The first call after VR_RoomReset (and any
+ * call with a non-finite head) only takes the head; a non-finite head is not kept. A non-finite body_yaw
+ * or upm, or upm <= 0, is no step (the head is kept); a negative or non-finite radius counts as 0. */
+void VR_RoomStep(vr_room_t *r, const vr_vec3_t *head, float body_yaw, float upm, float radius_units, float out_excess[2]);
+
 /* pure math */
 float VR_UnitsPerMetre(float eye_height_m, float world_scale);
 void  VR_TrackingToQuakePos(const vr_vec3_t *v, float upm, float out[3]);
 void  VR_TrackingToQuakeAngles(const vr_quat_t *q, float out[3]);
-void  VR_EyeOrigin(const float feet[3], float body_yaw, const vr_vec3_t *eye_pos,
-                   const vr_vec3_t *anchor, float upm, float out[3]);
+/* eye = feet + lean + rot(body_yaw, quake(eye_pos - head_pos).xy * upm); z = feet.z + eye_pos.y * upm * height_scale
+ * (head_pos.y is ignored: the height is absolute, above the floor) */
+void  VR_EyeOrigin(const float feet[3], float body_yaw, const float lean[2], const vr_vec3_t *head_pos,
+                   const vr_vec3_t *eye_pos, float upm, float height_scale, float out[3]);
+/* 1 if the feet moved more than 64 units horizontally since the previous frame (teleport, respawn, load);
+ * also 1 for a non-finite input */
+int   VR_BodyJumped(const float prev_feet[3], const float feet[3]);
 void  VR_ProjectionMatrix(const vr_fov_t *fov, float znear, float zfar, float out[16]);
 void  VR_QuakeViewMatrix(const float org[3], const float angles[3], float out[16]);
 void  VR_FrustumNormals(const float angles[3], const vr_fov_t *fov, float out[4][3]);

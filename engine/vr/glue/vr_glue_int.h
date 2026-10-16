@@ -12,11 +12,10 @@ extern vr_frame_t	vrg_frame;		/* flags of the last VR_BeginFrame */
 extern qboolean		vrg_active;		/* running && last frame had render != 0 */
 
 /* body yaw (degrees; not normalized: after VRG_PostInput it is in [0, 360) via anglemod, every
- * consumer normalizes) and the recenter anchor (tracking space, x/z used): the view yaw is
- * body_yaw + head yaw. Keyboard/mouse turn the body; the head adds its own rotation. */
+ * consumer normalizes): the view yaw is body_yaw + head yaw. Keyboard/mouse turn the body; the head
+ * adds its own rotation. Where the head stands is the room-scale lean (vrg_room, vr_glue_body.c). */
 extern float		vrg_body_yaw;
 extern qboolean		vrg_body_valid;		/* body_yaw taken from cl.viewangles since VR started */
-extern vr_vec3_t	vrg_anchor;
 
 /* vr_eye_height (metres) and vr_world_scale in use (VRG_CheckScaleCvars): the last valid values */
 extern float		vrg_eye_height, vrg_world_scale;
@@ -56,9 +55,21 @@ qboolean VRG_Calibrating (void);
 void VRG_CalibrateFrame (void);		/* every frame while VR runs: keeps the prompt on the screen */
 void VRG_CalibrateReset (void);		/* VR starts / stops: drops a calibration in progress */
 
+/* Room-scale on the client: the head's lean from the feet (Quake units, world x/y; the eyes are placed at
+ * feet + lean + their offset from the head) and the excess past vr_roomscale_radius that the body should
+ * walk (world units; until Task 2.7 dropped every frame). */
+extern vr_room_t	vrg_room;
+extern float		vrg_room_excess[2];
+void VRG_RoomReset (void);		/* lean 0, forget the last head */
+/* VRG_UpdateScreen, once per rendered frame before the eyes are placed (feet: r_refdef.vieworg -
+ * cl.viewheight after V_SetupRefdef; ignored without a world). Steps the lean; resets it on a new
+ * cl.worldmodel and when the feet jumped (VR_BodyJumped). */
+void VRG_RoomFrame (qboolean world, const vec3_t feet, const vr_vec3_t *head, float upm);
+float VRG_HeightScale (void);		/* eye height scale above the feet (game crouch): 1 until Task 2.8 */
+
 /* ---- from vr_glue.c, for vr_glue_body.c ---- */
 
 void VRG_CheckScaleCvars (void);	/* re-reads vr_eye_height / vr_world_scale into vrg_eye_height / vrg_world_scale */
-void VRG_Recenter (void);		/* the head's x/z becomes the player's origin (prints "VR: recentered") */
+void VRG_Recenter (void);		/* lean 0 (the head is over the feet), panel placed again (prints "VR: recentered") */
 
 #endif /* HXVR_VR_GLUE_INT_H */

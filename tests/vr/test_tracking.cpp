@@ -93,21 +93,25 @@ TEST_CASE("angles: straight up/down gimbal does not produce NaN") {
 	CHECK(a[0] == doctest::Approx(90.0f).epsilon(1e-3));
 }
 
+// The phase-1 cases with the old anchor passed as the head position, no lean and height scale 1: the
+// eye's offset from that point (x/z) is rotated by the body yaw, its y is the absolute height.
 TEST_CASE("eye origin") {
 	float feet[3] = {100, 200, 0};
+	const float no_lean[2] = {0, 0};
 	vr_vec3_t eye{0.f, 1.65f, 0.f}, anchor{0, 0, 0};
 	float o[3];
-	VR_EyeOrigin(feet, 0.f, &eye, &anchor, VR_UnitsPerMetre(1.65f, 1.f), o);
+	VR_EyeOrigin(feet, 0.f, no_lean, &anchor, &eye, VR_UnitsPerMetre(1.65f, 1.f), 1.f, o);
 	CHECK(vec_eq(o, {{100, 200, 50}}));
 	vr_vec3_t step{0.f, 1.65f, -0.5f};  // step forward 0.5 m
-	VR_EyeOrigin(feet, 90.f, &step, &anchor, 30.f, o);  // body turned 90 degrees (faces +Y)
+	VR_EyeOrigin(feet, 90.f, no_lean, &anchor, &step, 30.f, 1.f, o);  // body turned 90 degrees (faces +Y)
 	CHECK(vec_eq(o, {{100, 215, 49.5f}}));
 }
 
-TEST_CASE("eye origin: anchor offsets horizontally, ignored vertically") {
+TEST_CASE("eye origin: head position offsets horizontally, ignored vertically") {
 	float feet[3] = {0, 0, 0};
+	const float no_lean[2] = {0, 0};
 	vr_vec3_t eye{0.2f, 1.65f, -0.5f}, anchor{0.2f, 0.7f, -0.5f};
 	float o[3];
-	VR_EyeOrigin(feet, 0.f, &eye, &anchor, 30.f, o);
+	VR_EyeOrigin(feet, 0.f, no_lean, &anchor, &eye, 30.f, 1.f, o);
 	CHECK(vec_eq(o, {{0, 0, 49.5f}}));
 }

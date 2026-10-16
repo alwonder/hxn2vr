@@ -54,10 +54,9 @@ vr_frame_t		vrg_frame;		/* shared: vr_glue_int.h */
 qboolean		vrg_active;		/* shared: vr_glue_int.h */
 static qboolean		vrg_frame_pending;	/* VR_BeginFrame done, VR_EndFrame not yet */
 
-/* body yaw and the recenter anchor (shared: see vr_glue_int.h) */
+/* body yaw (shared: see vr_glue_int.h) */
 float			vrg_body_yaw;
 qboolean		vrg_body_valid;
-vr_vec3_t		vrg_anchor;
 static qboolean		vrg_recenter_pending;	/* auto-recenter on the first rendered frame after VR starts
 						 * or after the backend reported vr_frame_t.recenter */
 
@@ -264,7 +263,7 @@ static void VRG_Start (void)
 	memset (&vrg_frame, 0, sizeof(vrg_frame));
 	vrg_body_yaw = 0;
 	vrg_body_valid = false;
-	memset (&vrg_anchor, 0, sizeof(vrg_anchor));
+	VRG_RoomReset ();
 	vrg_recenter_pending = true;
 	vrg_panel_valid = false;
 	vrg_panel_reanchor = false;
@@ -458,18 +457,15 @@ void VRG_OnSetAngle (void)
 	VRG_HeadAngles (head);
 	vrg_body_yaw = VR_BodyYawFromSetAngle (cl.viewangles[YAW], head[YAW]);
 	vrg_body_valid = true;
+	VRG_RoomReset ();	/* teleport, spawn: the head is back over the feet */
 }
 
-/* the head's current position (x, z) becomes the player's origin (vr_recenter, and automatically
- * on the first rendered frame after VR starts). Safe print: may run mid-frame. */
+/* the head is put back over the feet: the lean is reset and wherever the head now is becomes the
+ * player's origin (vr_recenter, and automatically on the first rendered frame after VR starts or the
+ * runtime moved the tracking origin). Safe print: may run mid-frame. */
 void VRG_Recenter (void)
 {
-	vr_pose_t	pose;
-
-	VRG_TrackedPoses (&pose, NULL, NULL);
-	vrg_anchor.x = pose.pos.x;
-	vrg_anchor.y = 0;
-	vrg_anchor.z = pose.pos.z;
+	VRG_RoomReset ();
 	vrg_panel_reanchor = true;	/* the fixed 2D panel is placed again in front of the head */
 	Con_SafePrintf ("VR: recentered\n");
 }
@@ -538,13 +534,13 @@ static void VRG_PanelPlace (qboolean world, const vec3_t feet, float body_yaw, f
 
 	if (world && dest == key_game)
 	{
-		/* follows the body: vr_panel_pitch degrees below the (nominal) eye, vr_panel_distance ahead */
+		/* follows the body: vr_panel_pitch degrees below the nominal eye (the body's eye height over
+		 * feet + lean), vr_panel_distance ahead along the body yaw */
 		vr_vec3_t	eye;
 
-		eye.x = vrg_anchor.x;
-		eye.y = vrg_eye_height;
-		eye.z = vrg_anchor.z;
-		VR_EyeOrigin (feet, body_yaw, &eye, &vrg_anchor, upm, center);
+		eye.x = eye.z = 0;
+		eye.y = vrg_body.eye_height;
+		VR_EyeOrigin (feet, body_yaw, vrg_room.lean, &eye, &eye, upm, VRG_HeightScale (), center);
 		yaw = body_yaw;
 		VRG_CheckPanelPitch ();
 		pitch = vrg_panel_pitch;
@@ -633,10 +629,9 @@ qboolean VRG_UpdateScreen (void)
 	int		eye, numvis = 0;
 	qboolean	world, panel;
 	vec3_t		feet, save_org, save_ang, head_ang, eye_org, eye_ang, head_org, head_view;
-	float		body_yaw, upm;
+	float		body_yaw, upm, hscale;
 	float		corners[4][3];
 	vr_pose_t	head, eyes[2];
-	vr_vec3_t	anchor = vrg_anchor;
 
 	if (vrg_in_update)
 		return true;	/* re-entered (Con_Printf during signon) while this frame is being drawn */
@@ -668,7 +663,9 @@ qboolean VRG_UpdateScreen (void)
 	/* the 2D layer (menus, console, HUD, centerprint...) goes into the panel texture first;
 	 * without a world the player stands at the origin */
 	VRG_TrackedPoses (&head, eyes, NULL);	/* with vr_height_offset */
-	VR_EyeOrigin (feet, body_yaw, &head.pos, &anchor, upm, head_org);
+	VRG_RoomFrame (world, feet, &head.pos, upm);	/* the head's lean from the feet, this frame */
+	hscale = VRG_HeightScale ();
+	VR_EyeOrigin (feet, body_yaw, vrg_room.lean, &head.pos, &head.pos, upm, hscale, head_org);
 	VR_TrackingToQuakeAngles (&head.rot, head_ang);
 	VR_ComposeViewAngles (body_yaw, head_ang, head_view);
 	VRG_PanelPlace (world, feet, body_yaw, upm, head_org, head_view, corners);
@@ -680,7 +677,7 @@ qboolean VRG_UpdateScreen (void)
 		if (VR_BeginEye (eye))
 		{
 			VR_GetEye (eye, NULL, &vrg_eye_fov);
-			VR_EyeOrigin (feet, body_yaw, &eyes[eye].pos, &anchor, upm, eye_org);
+			VR_EyeOrigin (feet, body_yaw, vrg_room.lean, &head.pos, &eyes[eye].pos, upm, hscale, eye_org);
 			VR_TrackingToQuakeAngles (&eyes[eye].rot, head_ang);
 			VR_ComposeViewAngles (body_yaw, head_ang, eye_ang);
 			if (world)

@@ -36,6 +36,10 @@
        B and C: `vr_calibrate` and the main trigger pressed twice (eye height, then arm): the log must have
        `VR: calibration done: eye height 1.65 m, arm 0.53 m` (the mock head is at 1.65 m, its right hand 0.535 m
        from the shoulder), and C must show no held key (the calibration took the trigger presses).
+       Then the room-scale lean: C must show a lean under 0.5 units (the calibration recentered), the mock
+       head is moved 0.2 m forward over 1 s (`vr_mock_head 0 0 -0.2 1`) and `vr_where` (D) must show a
+       horizontal lean of 7.27 +- 0.5 units (0.2 m x 36.36 units/m, inside the 9.09-unit radius) pointing
+       along the body yaw of D (+-5 deg: the lean is in world axes).
 
   check_shot --stereo alone cannot prove VR ran, so every run also uses -condebug and the
   console log must contain `VR: started (mock)` and no `VR:` error line (`VR: recentered` is allowed;
@@ -110,7 +114,10 @@ $all = [ordered]@{
             'vr_calibrate',                                            # step 1: stand, look ahead, trigger
             'vr_mock_hand right trigger 1', 'vr_mock_hand right trigger 0',
             'vr_mock_hand right trigger 1', 'vr_mock_hand right trigger 0',   # step 2: arm out, trigger
-            'vr_where');                                               # C (also: no key left held by the triggers)
+            'vr_where',                                                # C (also: no key left held by the triggers)
+            'vr_mock_head 0 0 -0.2 1',                                 # the head leans 0.2 m forward over 1 s
+            ((@('wait') * 150) -join '; '),
+            'vr_where');                                               # D: lean ~7.27 units along the body yaw
         Stereo = $true; Where = $true; Calibrate = $true; WaitLines = 3; Pending = $false }
     # quit from the controller in the main menu (no map). The first line runs before VR starts (same
     # command buffer pass as +vr_enabled 1); the mock commands run once it is up. Hexen.rc opens the
@@ -176,12 +183,13 @@ function Test-VrLog([string]$path, $sc) {
     if ($sc.Where) {
         $re = '^VR: where origin (\S+) (\S+) (\S+) yaw (\S+) lean (\S+) (\S+) view (\S+) crouch (\d) held (\d+) crouchkey (\d)$'
         $w = @($vrLines | Where-Object { $_ -cmatch $re })
-        if ($w.Count -ne 3) { return "expected 3 'VR: where' lines (A, B, C), found $($w.Count): $($w -join ' | ')" }
+        if ($w.Count -ne 4) { return "expected 4 'VR: where' lines (A, B, C, D), found $($w.Count): $($w -join ' | ')" }
         $p = @()
         foreach ($l in $w) {
             [void]($l -cmatch $re)
             $p += ,@{ X = [double]::Parse($Matches[1], [cultureinfo]::InvariantCulture); Y = [double]::Parse($Matches[2], [cultureinfo]::InvariantCulture)
-                      Yaw = [double]::Parse($Matches[4], [cultureinfo]::InvariantCulture); Held = [int]$Matches[9]; CrouchKey = [int]$Matches[10] }
+                      Yaw = [double]::Parse($Matches[4], [cultureinfo]::InvariantCulture); Held = [int]$Matches[9]; CrouchKey = [int]$Matches[10]
+                      LeanX = [double]::Parse($Matches[5], [cultureinfo]::InvariantCulture); LeanY = [double]::Parse($Matches[6], [cultureinfo]::InvariantCulture) }
         }
         $dist = [math]::Sqrt([math]::Pow($p[1].X - $p[0].X, 2) + [math]::Pow($p[1].Y - $p[0].Y, 2))
         Write-Host ("vr-mock-smoke: stick move A->B {0:N1} units, turn B->C {1:N1} deg" -f $dist, ((($p[2].Yaw - $p[1].Yaw) % 360 + 360) % 360))
@@ -189,6 +197,15 @@ function Test-VrLog([string]$path, $sc) {
         $turn = (($p[2].Yaw - $p[1].Yaw) % 360 + 360) % 360
         if ([math]::Abs($turn - 315) -gt 1) { return "snap turn B -> C changed the yaw by $turn (mod 360), expected 315 +- 1: $($w -join ' | ')" }
         if ($p[2].Held -ne 0 -or $p[2].CrouchKey -ne 0) { return "buttons stuck after the sticks: $($w[2])" }
+        # room-scale lean: none after the calibration's recenter (C), 0.2 m of head motion forward (D)
+        $leanC = [math]::Sqrt([math]::Pow($p[2].LeanX, 2) + [math]::Pow($p[2].LeanY, 2))
+        $leanD = [math]::Sqrt([math]::Pow($p[3].LeanX, 2) + [math]::Pow($p[3].LeanY, 2))
+        Write-Host ("vr-mock-smoke: lean C {0:N2} units, D {1:N2} units" -f $leanC, $leanD)
+        if ($leanC -ge 0.5) { return "lean $leanC units at C, expected under 0.5 (the calibration recenters): $($w[2])" }
+        if ([math]::Abs($leanD - 7.27) -gt 0.5) { return "lean $leanD units at D after 0.2 m of head motion, expected 7.27 +- 0.5: $($w[3])" }
+        $leanYaw = [math]::Atan2($p[3].LeanY, $p[3].LeanX) * 180 / [math]::PI
+        $dYaw = (($leanYaw - $p[3].Yaw) % 360 + 540) % 360 - 180
+        if ([math]::Abs($dYaw) -gt 5) { return "lean at D points at $leanYaw deg, expected along the body yaw $($p[3].Yaw) +- 5: $($w[3])" }
     }
     # Expected VR: lines are the start/stop/recenter/default-bindings notices (and vr_where output); anything else is an error report.
     $bad = @($vrLines | Where-Object { $_ -cne 'VR: started (mock)' -and $_ -cne 'VR: stopped' -and $_ -cne 'VR: recentered' -and
