@@ -24,6 +24,7 @@
 #include "bgmusic.h"
 #include "cdaudio.h"
 #include "r_shared.h"
+#include "vr_glue.h"	/* HXVR */
 
 void (*vid_menudrawfn)(void);
 void (*vid_menukeyfn)(int key);
@@ -3494,6 +3495,10 @@ static void M_Quit_Key (int key)
 		}
 		break;
 
+	case K_ENTER:	/* HXVR: in VR, Enter (controller A / X / main trigger) confirms the quit */
+		if (!VRG_SimActive ())	/* HXVR */
+			break;		/* HXVR */
+		/* fall through */	/* HXVR */
 	case 'Y':
 	case 'y':
 		Key_SetDest (key_console);

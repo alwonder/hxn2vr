@@ -135,6 +135,18 @@
 #define	K_AUX31			241
 #define	K_AUX32			242
 
+/* HXVR: VR controller buttons (main hand = vr_mainhand, O = the other hand); 253, 254 free */
+#define	K_VR_TRIGGER		243
+#define	K_VR_GRIP		244
+#define	K_VR_A			245
+#define	K_VR_B			246
+#define	K_VR_STICK		247
+#define	K_VR_OTRIGGER		248
+#define	K_VR_OGRIP		249
+#define	K_VR_X			250
+#define	K_VR_Y			251
+#define	K_VR_OSTICK		252
+
 
 #define	MAXCMDLINE	256
 

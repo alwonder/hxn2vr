@@ -1,10 +1,12 @@
 // vr_input.cpp -- controller state of the hxvr C API: per-frame snapshot of both hands, button
-// hysteresis, and the mock-only setters. Must not include engine headers.
+// hysteresis, the mock-only setters and the menu stick repeat. Must not include engine headers.
 #include "vr_api.h"
 
 #include "vr_input.hpp"
 
 #include <glm/glm.hpp>
+
+#include <cmath>
 
 namespace {
 
@@ -97,6 +99,49 @@ void VR_MockSetHeadOffset(const vr_vec3_t* target, float seconds) {
 	hxvr::Backend* b = hxvr::activeBackend();
 	if (!b || !target) return;
 	b->mockSetHeadOffset(glm::vec3(target->x, target->y, target->z), seconds);
+}
+
+// Menu arrows from a stick (see vr_api.h). The held direction is kept while its own axis stays past
+// kStickHold with the same sign, even if the other axis becomes larger (no flicker on a diagonal);
+// once it is let go, a new direction can start in the same call.
+int VR_StickRepeat(vr_repeat_t* r, const float stick[2], float dt) {
+	constexpr float kStickStart = 0.6f;
+	constexpr float kStickHold = 0.3f;
+	constexpr float kRepeatDelay = 0.45f;
+	constexpr float kRepeatEvery = 0.12f;
+	if (!r) return VR_DIR_NONE;
+	float x = stick ? stick[0] : 0.0f, y = stick ? stick[1] : 0.0f;
+	if (!std::isfinite(x)) x = 0.0f;
+	if (!std::isfinite(y)) y = 0.0f;
+	if (!std::isfinite(dt) || !(dt > 0.0f)) dt = 0.0f;
+
+	// the held direction's own axis, signed so that "towards the direction" is positive
+	float along = 0.0f;
+	switch (r->dir) {
+		case VR_DIR_UP: along = y; break;
+		case VR_DIR_DOWN: along = -y; break;
+		case VR_DIR_RIGHT: along = x; break;
+		case VR_DIR_LEFT: along = -x; break;
+		default: r->dir = VR_DIR_NONE; break;
+	}
+	if (r->dir != VR_DIR_NONE) {
+		if (along >= kStickHold) {
+			r->held += dt;
+			if (r->held < r->next) return VR_DIR_NONE;
+			r->next += kRepeatEvery;
+			if (r->next <= r->held) r->next = r->held + kRepeatEvery;   // after a long frame: no burst
+			return r->dir;
+		}
+		r->dir = VR_DIR_NONE;   // let go
+	}
+
+	const bool vertical = std::fabs(y) >= std::fabs(x);
+	const float dominant = vertical ? y : x;
+	if (std::fabs(dominant) < kStickStart) return VR_DIR_NONE;
+	r->dir = vertical ? (dominant > 0.0f ? VR_DIR_UP : VR_DIR_DOWN) : (dominant > 0.0f ? VR_DIR_RIGHT : VR_DIR_LEFT);
+	r->held = 0.0f;
+	r->next = kRepeatDelay;
+	return r->dir;
 }
 
 }  // extern "C"

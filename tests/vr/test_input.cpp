@@ -320,3 +320,14 @@ TEST_CASE("vr_status reports the hand profiles and whether each hand is active")
 	CHECK(st.hand_active[0] == 0);
 	CHECK(st.hand_active[1] == 0);
 }
+
+TEST_CASE("stick repeat for menus") {
+	vr_repeat_t r{}; float up[2] = {0, 0.9f}, mid[2] = {0, 0.4f}, rel[2] = {0, 0.1f}, right[2] = {0.95f, 0.2f};
+	CHECK(VR_StickRepeat(&r, up, 0.016f) == VR_DIR_UP);
+	for (int i = 0; i < 4; ++i) CHECK(VR_StickRepeat(&r, up, 0.1f) == VR_DIR_NONE);   // 0.1..0.4 s
+	CHECK(VR_StickRepeat(&r, up, 0.1f) == VR_DIR_UP);     // 0.5 >= 0.45
+	CHECK(VR_StickRepeat(&r, mid, 0.1f) == VR_DIR_UP);    // 0.6 >= 0.57, still held at 0.4
+	CHECK(VR_StickRepeat(&r, rel, 0.1f) == VR_DIR_NONE);  // released
+	CHECK(VR_StickRepeat(&r, right, 0.016f) == VR_DIR_RIGHT);
+	float down[2] = {0.1f, -0.7f}; CHECK(VR_StickRepeat(&r, down, 0.016f) == VR_DIR_DOWN);   // new direction at once
+}

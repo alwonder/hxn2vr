@@ -152,6 +152,17 @@ static keyname_t keynames[] =
 	{"AUX31", K_AUX31},
 	{"AUX32", K_AUX32},
 
+	{"VR_TRIGGER", K_VR_TRIGGER},	/* HXVR: VR controller buttons */
+	{"VR_GRIP", K_VR_GRIP},		/* HXVR */
+	{"VR_A", K_VR_A},		/* HXVR */
+	{"VR_B", K_VR_B},		/* HXVR */
+	{"VR_STICK", K_VR_STICK},	/* HXVR */
+	{"VR_OTRIGGER", K_VR_OTRIGGER},	/* HXVR */
+	{"VR_OGRIP", K_VR_OGRIP},	/* HXVR */
+	{"VR_X", K_VR_X},		/* HXVR */
+	{"VR_Y", K_VR_Y},		/* HXVR */
+	{"VR_OSTICK", K_VR_OSTICK},	/* HXVR */
+
 	{"PAUSE", K_PAUSE},
 
 	{"SEMICOLON", ';'},	// because a raw semicolon seperates commands

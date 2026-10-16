@@ -14,10 +14,18 @@
     e  vr_backend openxr, map demo1    -> flat fallback: no headset session can start, so the log has a
        `VR:` failure line, vr_enabled is reset to 0 and the screenshot is mono (check_shot passes,
        check_shot --stereo rejects it). SKIPPED if an OpenXR session does start (headset connected).
+    g  no map, mock controller only    -> quit from the controller: the startup main menu is closed first
+       (menu_main; togglemenu), then Menu opens the main menu, stick up
+       moves the cursor to QUIT, A opens the "quit?" box, A again quits. run-smoke -ExpectQuit: the
+       engine must exit by itself with code 0 before the timeout (no screenshot); the log must also
+       have `VR: default controller bindings set` (the VR keys are unbound first, so the defaults are
+       set when VR starts). Short waits (WaitLines 3): a stick held for 0.45 s would auto-repeat
+       (the glue counts a long frame as at most 0.1 s, so 3 frames stay below that at any frame rate).
 
   check_shot --stereo alone cannot prove VR ran, so every run also uses -condebug and the
   console log must contain `VR: started (mock)` and no `VR:` error line (`VR: recentered` is allowed;
-  scenario a requires it: the auto-recenter on the first rendered frame). The log is written to
+  scenario a requires it: the auto-recenter on the first rendered frame; `VR: default controller
+  bindings set` is allowed too, scenario g requires it). The log is written to
   <basedir>\debug_h2.log (userdir == basedir on Windows; run-smoke also uses GameDir as the
   working directory), deleted before each run and removed afterwards.
 
@@ -35,7 +43,7 @@
 [CmdletBinding()]
 param(
     [string]$Exe = 'build/win64/Debug/hxn2vr.exe',
-    [string[]]$Scenarios = @('a', 'b', 'c', 'd', 'e'),
+    [string[]]$Scenarios = @('a', 'b', 'c', 'd', 'e', 'g'),
     [string]$GameDir = 'build/game',
     [switch]$IncludePending,
     [int]$TimeoutSec = 180,
@@ -73,6 +81,17 @@ $all = [ordered]@{
     d = @{ Commands = @('map demo1', 'vid_restart'); Stereo = $true; Pending = $false; Restarts = 1 }
     # no headset: the OpenXR session cannot start, the game falls back to the flat view
     e = @{ Commands = @('map demo1', 'vr_enabled', 'vr_status'); Backend = 'openxr'; Fallback = $true; Pending = $false }
+    # quit from the controller in the main menu (no map). The first line runs before VR starts (same
+    # command buffer pass as +vr_enabled 1); the mock commands run once it is up. Hexen.rc opens the
+    # main menu at startup (menu_main): `menu_main; togglemenu` closes it whatever Hexen.rc did, so
+    # the Menu button has to open it again (cursor still on SINGLE PLAYER).
+    g = @{ Commands = @(
+            'menu_main; togglemenu; unbind VR_TRIGGER; unbind VR_GRIP; unbind VR_A; unbind VR_B; unbind VR_STICK; unbind VR_OTRIGGER; unbind VR_OGRIP; unbind VR_X; unbind VR_Y; unbind VR_OSTICK',
+            'vr_mock_hand left menu 1', 'vr_mock_hand left menu 0',   # Escape: the main menu opens
+            'vr_mock_hand right sy 1', 'vr_mock_hand right sy 0',     # up arrow: SINGLE PLAYER -> QUIT
+            'vr_mock_hand right a 1', 'vr_mock_hand right a 0',       # Enter: the "quit?" box
+            'vr_mock_hand right a 1', 'vr_mock_hand right a 0');      # Enter: quit (VR only)
+        ExpectQuit = $true; WaitLines = 3; Bindings = $true; Pending = $false }
 }
 
 # Returns $null if the log is right, 'SKIP: ...' if the scenario cannot run here, else the failure text.
@@ -103,8 +122,10 @@ function Test-VrLog([string]$path, $sc) {
         if ($stoppedCount -ne [int]$sc.Restarts) { return "expected $($sc.Restarts) 'VR: stopped' line(s) (before the video restart), found $stoppedCount" }
     }
     if ($sc.Recenter -and -not ($vrLines -ccontains 'VR: recentered')) { return "log has no 'VR: recentered' line (auto-recenter did not run)" }
-    # Expected VR: lines are the start/stop/recenter notices; anything else is an error report.
-    $bad = @($vrLines | Where-Object { $_ -cne 'VR: started (mock)' -and $_ -cne 'VR: stopped' -and $_ -cne 'VR: recentered' })
+    if ($sc.Bindings -and -not ($vrLines -ccontains 'VR: default controller bindings set')) { return "log has no 'VR: default controller bindings set' line" }
+    # Expected VR: lines are the start/stop/recenter/default-bindings notices; anything else is an error report.
+    $bad = @($vrLines | Where-Object { $_ -cne 'VR: started (mock)' -and $_ -cne 'VR: stopped' -and $_ -cne 'VR: recentered' -and
+        $_ -cne 'VR: default controller bindings set' })
     if ($bad.Count) { return "log has VR error line(s): $($bad -join ' | ')" }
     return $null
 }
@@ -112,7 +133,7 @@ function Test-VrLog([string]$path, $sc) {
 $failed = @()
 $results = @()
 foreach ($s in $Scenarios) {
-    if (-not $all.Contains($s)) { throw "unknown scenario '$s' (a, b, c, d, e)" }
+    if (-not $all.Contains($s)) { throw "unknown scenario '$s' (a, b, c, d, e, g)" }
     $sc = $all[$s]
     if ($sc.Pending -and -not $IncludePending) {
         Write-Host "vr-mock-smoke ($s): PENDING (skipped; -IncludePending to run)"
@@ -132,8 +153,11 @@ foreach ($s in $Scenarios) {
     $skip = $false
     try {
         try {
-            & $runSmoke -Exe $Exe -Name "vr_$s" -Commands $sc.Commands -ExtraArgs (Get-VrArgs $backend) `
-                -GameDir $GameDir -TimeoutSec $TimeoutSec
+            $runArgs = @{ Exe = $Exe; Name = "vr_$s"; Commands = $sc.Commands; ExtraArgs = (Get-VrArgs $backend)
+                GameDir = $GameDir; TimeoutSec = $TimeoutSec }
+            if ($sc.WaitLines) { $runArgs.WaitLines = [int]$sc.WaitLines }
+            if ($sc.ExpectQuit) { $runArgs.ExpectQuit = $true }
+            & $runSmoke @runArgs
             if ($LASTEXITCODE -ne 0) { $why = "run-smoke failed ($LASTEXITCODE)" }
         }
         catch { $why = "run-smoke error: $_" }
@@ -141,7 +165,7 @@ foreach ($s in $Scenarios) {
             $why = Test-VrLog $log $sc
             if ($why -and $why.StartsWith('SKIP: ')) { $skip = $true; $why = $why.Substring(6) }
         }
-        if (-not $why) {
+        if (-not $why -and -not $sc.ExpectQuit) {   # ExpectQuit runs take no screenshot
             if ($sc.Fallback) {
                 # the flat fallback shot: a real picture (not one colour) but not a stereo pair
                 & py -I $checkShot $shot

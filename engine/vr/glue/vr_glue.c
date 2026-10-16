@@ -7,6 +7,7 @@
 #include "quakedef.h"
 #include "vr_api.h"
 #include "vr_glue.h"
+#include "vr_glue_int.h"
 
 cvar_t	vr_enabled = {"vr_enabled", "0", CVAR_ARCHIVE};
 cvar_t	vr_backend = {"vr_backend", "openxr", CVAR_ARCHIVE};	/* openxr / mock */
@@ -25,9 +26,6 @@ cvar_t	vr_debug_ticks = {"vr_debug_ticks", "0", CVAR_NONE};
 static void VRG_Recenter_f (void);
 static void VRG_Status_f (void);
 static void VRG_Recenter (void);
-static void VRG_MockHand_f (void);
-static void VRG_MockHead_f (void);
-static void VRG_MockHandsReset (void);
 
 void VRG_Init (void)
 {
@@ -46,24 +44,20 @@ void VRG_Init (void)
 	Cvar_RegisterVariable (&vr_debug_ticks);
 	Cmd_AddCommand ("vr_recenter", VRG_Recenter_f);
 	Cmd_AddCommand ("vr_status", VRG_Status_f);
-	Cmd_AddCommand ("vr_mock_hand", VRG_MockHand_f);
-	Cmd_AddCommand ("vr_mock_head", VRG_MockHead_f);
-	VRG_MockHandsReset ();
+	VRG_InputInit ();	/* vr_mainhand, vr_bind_defaults, vr_mock_hand, vr_mock_head */
 }
 
 /* ---- VR session state ---- */
 
 static vr_simclock_t	vrg_simclock;
-static vr_frame_t	vrg_frame;		/* flags of the last VR_BeginFrame */
-static qboolean		vrg_active;		/* running && last frame had render != 0 */
+vr_frame_t		vrg_frame;		/* shared: vr_glue_int.h */
+qboolean		vrg_active;		/* shared: vr_glue_int.h */
 static qboolean		vrg_frame_pending;	/* VR_BeginFrame done, VR_EndFrame not yet */
 
-/* body yaw (degrees; not normalized: after VRG_PostInput it is in [0, 360) via anglemod, every
- * consumer normalizes) and the recenter anchor (tracking space, x/z used): the view yaw is
- * body_yaw + head yaw. Keyboard/mouse turn the body; the head adds its own rotation. */
-static float		vrg_body_yaw;
-static qboolean		vrg_body_valid;		/* body_yaw taken from cl.viewangles since VR started */
-static vr_vec3_t	vrg_anchor;
+/* body yaw and the recenter anchor (shared: see vr_glue_int.h) */
+float			vrg_body_yaw;
+qboolean		vrg_body_valid;
+vr_vec3_t		vrg_anchor;
 static qboolean		vrg_recenter_pending;	/* auto-recenter on the first rendered frame after VR starts
 						 * or after the backend reported vr_frame_t.recenter */
 
@@ -102,7 +96,7 @@ static float		vrg_ticks_per_s;
 static qboolean		vrg_restart_wanted;
 
 /* vr_eye_height (metres) and vr_world_scale in use (VRG_CheckScaleCvars): the last valid values */
-static float		vrg_eye_height = 1.65f, vrg_world_scale = 1.2f;
+float			vrg_eye_height = 1.65f, vrg_world_scale = 1.2f;	/* shared: vr_glue_int.h */
 static qboolean		vrg_eye_height_warned, vrg_world_scale_warned;
 
 /* vr_panel_pitch in use (VRG_CheckPanelPitch): the last valid value, clamped to [-30, 80] */
@@ -282,14 +276,15 @@ static void VRG_Start (void)
 	vrg_tick_count = 0;
 	vrg_ticks_per_s = 0;
 	vrg_frame_pending = false;
-	VRG_MockHandsReset ();
 	VRG_SaveSwapInterval ();
 	VID_VRSoundFocus ();	/* sound plays while VR runs, also with the desktop window unfocused */
 	Con_Printf ("VR: started (%s)\n", bname);
+	VRG_InputStart ();	/* button state, mock hands; may set (and announce) the default bindings */
 }
 
 static void VRG_Stop (void)
 {
+	VRG_ReleaseAllKeys ();	/* no +attack / +jump stays held by a controller button */
 	VRG_EndFrame ();
 	VR_Stop ();
 	VRG_RestoreSwapInterval ();
@@ -350,6 +345,8 @@ qboolean VRG_HostFrameBegin (void)
 			vrg_recenter_pending = false;
 			VRG_Recenter ();
 		}
+
+		VRG_InputFrame ();	/* controller buttons -> key events (may change key_dest) */
 
 		if (vr_debug_ticks.integer)
 		{
@@ -714,129 +711,6 @@ qboolean VRG_UpdateScreen (void)
 	V_UpdatePalette ();	/* cshift decay and gamma, as in the flat path */
 	GL_EndRendering ();
 	return true;
-}
-
-/* ---- mock controllers (dev commands, mock backend only) ---- */
-
-/* what vr_mock_hand last sent to the module, one copy per hand (the mock's default hands after a
- * VR start: active, both poses valid, held in front of the chest) */
-static vr_hand_t	vrg_mock_hand[2];
-
-static void VRG_MockHandsReset (void)
-{
-	int	i;
-
-	memset (vrg_mock_hand, 0, sizeof(vrg_mock_hand));
-	for (i = 0; i < 2; i++)
-	{
-		vr_hand_t	*h = &vrg_mock_hand[i];
-
-		h->active = 1;
-		h->pose_valid = 1;
-		h->grip.pos.x = h->aim.pos.x = (i == VR_HAND_LEFT) ? -0.2f : 0.2f;
-		h->grip.pos.y = h->aim.pos.y = 1.0f;
-		h->grip.pos.z = h->aim.pos.z = -0.3f;
-		h->grip.rot.w = h->aim.rot.w = 1.0f;
-	}
-}
-
-static void VRG_MockHandUsage (void)
-{
-	Con_Printf ("VR: usage: vr_mock_hand <left|right> <trigger|grip|a|b|stick|menu|sx|sy|active|valid> <value>\n");
-}
-
-static void VRG_SetButton (vr_hand_t *h, unsigned bit, qboolean on)
-{
-	if (on)
-		h->buttons |= bit;
-	else
-		h->buttons &= ~bit;
-}
-
-/* vr_mock_hand <left|right> <field> <value>: sets one raw field of a mock hand. a = LOWER, b = UPPER
- * (whichever hand), grip = squeeze, stick = thumbstick click, sx / sy = stick axes. */
-static void VRG_MockHand_f (void)
-{
-	const char	*hname, *field;
-	float		v;
-	int		hand;
-	vr_hand_t	*h;
-
-	if (Cmd_Argc () != 4)
-	{
-		VRG_MockHandUsage ();
-		return;
-	}
-	hname = Cmd_Argv (1);
-	field = Cmd_Argv (2);
-	v = atof (Cmd_Argv (3));
-	if (!q_strcasecmp (hname, "left"))
-		hand = VR_HAND_LEFT;
-	else if (!q_strcasecmp (hname, "right"))
-		hand = VR_HAND_RIGHT;
-	else
-	{
-		VRG_MockHandUsage ();
-		return;
-	}
-	h = &vrg_mock_hand[hand];
-
-	if (!q_strcasecmp (field, "trigger"))
-		h->trigger = v;
-	else if (!q_strcasecmp (field, "grip"))
-		h->squeeze = v;
-	else if (!q_strcasecmp (field, "a"))
-		VRG_SetButton (h, VR_BTN_LOWER, v != 0);
-	else if (!q_strcasecmp (field, "b"))
-		VRG_SetButton (h, VR_BTN_UPPER, v != 0);
-	else if (!q_strcasecmp (field, "stick"))
-		VRG_SetButton (h, VR_BTN_STICK, v != 0);
-	else if (!q_strcasecmp (field, "menu"))
-		VRG_SetButton (h, VR_BTN_MENU, v != 0);
-	else if (!q_strcasecmp (field, "sx"))
-		h->stick[0] = v;
-	else if (!q_strcasecmp (field, "sy"))
-		h->stick[1] = v;
-	else if (!q_strcasecmp (field, "active"))
-		h->active = (v != 0);
-	else if (!q_strcasecmp (field, "valid"))
-		h->pose_valid = (v != 0);
-	else
-	{
-		VRG_MockHandUsage ();
-		return;
-	}
-	if (!VR_IsRunning ())
-	{
-		Con_Printf ("VR: not running\n");
-		return;
-	}
-	VR_MockSetHand (hand, h);
-}
-
-/* vr_mock_head <x> <y> <z> [seconds]: moves the mock head to this offset from its rest position
- * (metres, tracking axes: x right, y up, -z forward), linearly over `seconds` (default: at once). */
-static void VRG_MockHead_f (void)
-{
-	vr_vec3_t	target;
-	float		seconds = 0;
-
-	if (Cmd_Argc () < 4 || Cmd_Argc () > 5)
-	{
-		Con_Printf ("VR: usage: vr_mock_head <x> <y> <z> [seconds]\n");
-		return;
-	}
-	target.x = atof (Cmd_Argv (1));
-	target.y = atof (Cmd_Argv (2));
-	target.z = atof (Cmd_Argv (3));
-	if (Cmd_Argc () == 5)
-		seconds = atof (Cmd_Argv (4));
-	if (!VR_IsRunning ())
-	{
-		Con_Printf ("VR: not running\n");
-		return;
-	}
-	VR_MockSetHeadOffset (&target, seconds);
 }
 
 /* ---- vid_restart, vr_status ---- */

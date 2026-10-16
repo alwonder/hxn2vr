@@ -19,6 +19,7 @@ extern	cvar_t	vr_panel_width;
 extern	cvar_t	vr_mock_motion;
 extern	cvar_t	vr_mock_hz;
 extern	cvar_t	vr_debug_ticks;
+extern	cvar_t	vr_mainhand;		/* vr_glue_input.c: 0 left, 1 right (= VR_HAND_*) */
 
 void VRG_Init (void);		/* Host_Init, before config.cfg/hexen.rc are executed: registers cvars */
 void VRG_Shutdown (void);	/* Host_Shutdown: stops the module if running */

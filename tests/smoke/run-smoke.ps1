@@ -11,6 +11,10 @@
   (DO_USERDIRS is 0, host_parms->userdir == -basedir), and SCR_ScreenShot_f writes
   through FS_WriteFile(FS_USERDIR) -> <basedir>\data1\shots\hexen00.tga. The cfg is
   read by `exec` through the normal search path, which includes <basedir>\data1.
+
+  -ExpectQuit: the commands themselves make the engine quit (e.g. through the quit menu). The cfg
+  then has no `screenshot` / `quit`, and success means the process exited by itself with code 0
+  before the timeout (no screenshot is checked).
 #>
 [CmdletBinding()]
 param(
@@ -20,7 +24,8 @@ param(
     [string[]]$ExtraArgs = @(),
     [string]$GameDir = 'build/game',
     [int]$TimeoutSec = 120,
-    [int]$WaitLines = 150
+    [int]$WaitLines = 150,
+    [switch]$ExpectQuit
 )
 
 $ErrorActionPreference = 'Stop'
@@ -50,12 +55,14 @@ foreach ($c in $Commands) {
     $lines.Add($c)
     for ($i = 0; $i -lt $WaitLines; $i++) { $lines.Add('wait') }
 }
-$lines.Add('screenshot')
-for ($i = 0; $i -lt 3; $i++) { $lines.Add('wait') }   # screenshot is written synchronously; small margin
-# Host_Quit_f opens the "really quit?" menu while connected and the console is up, which
-# would hang a headless run; disconnect first so quit exits immediately.
-$lines.Add('disconnect')
-$lines.Add('quit')
+if (-not $ExpectQuit) {
+    $lines.Add('screenshot')
+    for ($i = 0; $i -lt 3; $i++) { $lines.Add('wait') }   # screenshot is written synchronously; small margin
+    # Host_Quit_f opens the "really quit?" menu while connected and the console is up, which
+    # would hang a headless run; disconnect first so quit exits immediately.
+    $lines.Add('disconnect')
+    $lines.Add('quit')
+}
 [System.IO.File]::WriteAllText((Join-Path $data1 $cfgName), (($lines -join "`n") + "`n"),
     (New-Object System.Text.UTF8Encoding($false)))
 
@@ -73,6 +80,7 @@ $proc = Start-Process -FilePath $Exe -ArgumentList $argStr -WorkingDirectory $Ga
 if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
     try { $proc.Kill() } catch {}
     try { [void]$proc.WaitForExit(15000) } catch {}   # let it release its files (debug log) before callers clean up
+    if ($ExpectQuit) { Fail "run-smoke: the engine did not quit by itself within $TimeoutSec s, process killed" }
     Fail "run-smoke: timeout after $TimeoutSec s, process killed"
     exit 1
 }
@@ -80,6 +88,10 @@ $proc.WaitForExit()
 if ($proc.ExitCode -ne 0) {
     Fail "run-smoke: engine exit code $($proc.ExitCode)"
     exit 1
+}
+if ($ExpectQuit) {
+    Write-Host 'run-smoke: OK, the engine quit by itself (exit code 0)'
+    exit 0
 }
 $shot = Join-Path $shots 'hexen00.tga'
 if (-not (Test-Path -LiteralPath $shot)) {
