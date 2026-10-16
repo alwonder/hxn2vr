@@ -772,6 +772,8 @@ static void VRG_Status_f (void)
 	if (st.runtime[0])
 		Con_Printf ("VR: runtime %s\n", st.runtime);
 	Con_Printf ("VR: eye %dx%d, swapchain format %s\n", st.eye_w, st.eye_h, st.format[0] ? st.format : "n/a");
+	Con_Printf ("VR: tracking space %s\n", st.stage_space ? "floor level (STAGE)" :
+			"LOCAL (no floor: the head starts at vr_eye_height)");
 	Con_Printf ("VR: %.1f frames/s (%.1f rendered), %.1f server ticks/s\n", st.frames_per_s, st.rendered_per_s,
 			(now - vrg_tick_last < 2.0) ? vrg_ticks_per_s : 0.0f);
 	Con_Printf ("VR: hands left %s (%s), right %s (%s)\n",

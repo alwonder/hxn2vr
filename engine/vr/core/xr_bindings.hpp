@@ -10,6 +10,7 @@ namespace hxvr {
 // paths /user/hand/left and /user/hand/right; the hand of a binding is the prefix of its path.
 enum class Act { GripPose, AimPose, Trigger, Squeeze, Stick, StickClick, Lower, Upper, Menu };
 constexpr int kActCount = 9;
+static_assert(static_cast<int>(Act::Menu) + 1 == kActCount, "kActCount must follow the Act enum");
 
 // path: full input path, "/user/hand/<left|right>/input/<component>" (a string literal).
 struct Binding { Act act; const char* path; };

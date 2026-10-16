@@ -37,6 +37,9 @@ struct BackendInfo {
 	// Interaction profile per hand (0 = left, 1 = right). OpenXR: the runtime's current profile path,
 	// empty while no controller is bound; mock: always "mock".
 	std::string profile[2];
+	// The tracking space is floor-level (OpenXR STAGE; the mock is always). false = LOCAL shifted down by
+	// StartParams::eyeHeightM: the head height then is that value at session start, not the real one.
+	bool stageSpace = true;
 };
 
 // Contract (the caller, vr_module.cpp, guarantees it; backends may rely on it):

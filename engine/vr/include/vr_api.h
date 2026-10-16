@@ -46,7 +46,10 @@ typedef struct { double acc; } vr_simclock_t;
  * last full one-second window (0 when no frame came for 2 s).
  * hand_profile[VR_HAND_*]: the hand's current interaction profile (OpenXR: e.g.
  * "/interaction_profiles/oculus/touch_controller", empty when no controller is bound; mock: always
- * "mock"); hand_active: VR_GetHand(...).active of the last frame. */
+ * "mock"); hand_active: VR_GetHand(...).active of the last frame.
+ * stage_space: 1 if tracking poses are floor-relative from a real floor-level (STAGE) space (the mock: always);
+ * 0 if the runtime has only a LOCAL space, where the module shifts the origin down by the start
+ * eye height: the head height then starts at that value (vr_eye_height) and says nothing about the user. */
 typedef struct {
 	int   running;
 	char  backend[16];
@@ -57,6 +60,7 @@ typedef struct {
 	float frames_per_s, rendered_per_s;
 	char  hand_profile[2][64];
 	int   hand_active[2];
+	int   stage_space;
 } vr_status_t;
 
 int  VR_Start(const vr_host_t *host, const vr_start_params_t *p, char *err, int errlen);

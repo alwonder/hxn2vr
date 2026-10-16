@@ -174,7 +174,7 @@ void VRG_RoomStart (void)
 qboolean VRG_RoomWalking (void)
 {
 	return VR_IsRunning () && sv.active && cls.state == ca_connected && cls.signon == SIGNONS &&
-		cl.worldmodel && !cls.demoplayback && !cl.paused && !sv.paused && !cl.intermission &&
+		cl.worldmodel && !cls.demoplayback && !cl.paused && !sv.paused && !cl.intermission && !cl.v.cameramode &&
 		Key_GetDest () == key_game && vrg_frame.focused && vrg_frame.render && vr_roomscale.integer;
 }
 
@@ -248,8 +248,6 @@ void VRG_WriteMoveBlock (sizebuf_t *buf)
 }
 
 /* ---- physical crouch, camera height ---- */
-
-extern	kbutton_t	in_crouch;	/* cl_input.c (not in client.h) */
 
 static int		vrg_crouched;		/* VR_CrouchUpdate state (hysteresis) */
 static qboolean		vrg_crouch_rising;	/* stood up from a physical crouch, the game's view still rising */
@@ -446,6 +444,13 @@ static void VRG_CalEyeStep (void)
 	}
 	else
 	{
+		vr_status_t	st;
+
+		VR_GetStatus (&st);
+		if (!st.stage_space)
+			Con_SafePrintf ("VR: warning: no floor-level tracking space (LOCAL), so %.2f m is not your real eye height; type vr_eye_height <metres> or use seated mode (vr_seated 1)\n", y);
+		else if (y < 1.2f)
+			Con_SafePrintf ("VR: that is low for standing; for seated play set vr_seated 1 and calibrate again\n");
 		Cvar_SetValue ("vr_eye_height", y);
 		Cvar_SetValue ("vr_height_offset", 0);
 	}
@@ -550,4 +555,14 @@ static void VRG_Calibrate_f (void)
 	}
 	vrg_cal_step = VRG_CAL_EYE;
 	VRG_CalPrompt ();
+	/* the command was typed in the console, where the trigger would be Enter: in the running game the
+	 * console closes (as Host_Connect_f does), so the trigger can confirm the steps. Without a game (menu,
+	 * the console forced up over nothing) there is nothing to close: the calibration waits for one. */
+	if (cls.state == ca_connected && cls.signon == SIGNONS && !con_forcedup)
+	{
+		if (Key_GetDest () == key_console)
+			Key_SetDest (key_game);
+	}
+	else
+		Con_Printf ("VR: calibration continues in the game\n");
 }

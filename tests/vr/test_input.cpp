@@ -304,6 +304,7 @@ TEST_CASE("vr_status reports the hand profiles and whether each hand is active")
 		CHECK(std::string(st.hand_profile[VR_HAND_RIGHT]) == "mock");
 		CHECK(st.hand_active[VR_HAND_LEFT] == 1);
 		CHECK(st.hand_active[VR_HAND_RIGHT] == 1);
+		CHECK(st.stage_space == 1);   // the mock tracks in a floor-level (STAGE) space
 
 		vr_hand_t off{};   // inactive
 		VR_MockSetHand(VR_HAND_LEFT, &off);

@@ -251,6 +251,7 @@ void VR_GetStatus(vr_status_t *out) {
 	copy_str(out->format, sizeof out->format, info.swapchainFormat);
 	out->eye_w = size.x;
 	out->eye_h = size.y;
+	out->stage_space = info.stageSpace ? 1 : 0;
 	for (int h = 0; h < 2; ++h) {
 		copy_str(out->hand_profile[h], sizeof out->hand_profile[h], info.profile[h]);
 		vr_hand_t hand;

@@ -54,7 +54,7 @@ public:
 	void releaseEye(int) override { ++c_->releases; }
 	void endFrame() override { ++c_->ends; }
 	hxvr::BackendInfo info() const override {
-		return hxvr::BackendInfo{"fake", "visible", "FakeRuntime 1.2.3", "0x8C43 (sRGB)"};
+		return hxvr::BackendInfo{"fake", "visible", "FakeRuntime 1.2.3", "0x8C43 (sRGB)", {}, false};
 	}
 
 private:
@@ -224,6 +224,7 @@ TEST_CASE("status: stopped, then fake backend info, eye size and frame rates") {
 	CHECK(st.running == 0);
 	CHECK(std::string(st.state) == "stopped");
 	CHECK(st.backend[0] == '\0');
+	CHECK(st.stage_space == 0);
 	CHECK(st.eye_w == 0);
 	CHECK(st.frames_per_s == doctest::Approx(0.0f));
 	VR_GetStatus(nullptr);   // no crash
@@ -251,6 +252,7 @@ TEST_CASE("status: stopped, then fake backend info, eye size and frame rates") {
 	CHECK(std::string(st.state) == "visible");
 	CHECK(std::string(st.runtime) == "FakeRuntime 1.2.3");
 	CHECK(std::string(st.format) == "0x8C43 (sRGB)");
+	CHECK(st.stage_space == 0);   // the fake backend runs in a LOCAL space
 	CHECK(st.eye_w == 800);
 	CHECK(st.eye_h == 900);
 	CHECK(st.frames_per_s == doctest::Approx(10.0f).epsilon(0.01));

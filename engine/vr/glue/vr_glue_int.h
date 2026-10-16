@@ -43,6 +43,8 @@ extern qboolean		vrg_input_modal;
 
 /* ---- body model, tracked poses, calibration (vr_glue_body.c) ---- */
 
+extern	kbutton_t	in_crouch;	/* cl_input.c (not in client.h): vr_glue_input.c, vr_glue_body.c */
+
 extern vr_body_t	vrg_body;		/* current body model (metres), from vr_eye_height and the vr_body_* cvars */
 extern float		vrg_height_offset;	/* vr_height_offset in use (metres) */
 
@@ -73,7 +75,8 @@ void VRG_RoomStart (void);		/* VRG_Start: VRG_RoomReset and forget the previous 
  * vr_roomscale_radius, and the excess is added to vrg_room_excess only while VRG_RoomWalking. */
 void VRG_RoomFrame (qboolean world, const vec3_t feet, const vr_vec3_t *head, float upm);
 /* true while the local server advances this player for a room-scale move: VR runs, a local server with
- * a world, connected and signed on, no demo, not paused (client or server), not in intermission, key_game,
+ * a world, connected and signed on, no demo, not paused (client or server), not in intermission or a
+ * camera cutscene (cl.v.cameramode), key_game,
  * the headset focused and rendering (VRG_ServerTicks runs ticks), vr_roomscale on */
 qboolean VRG_RoomWalking (void);
 /* Scale of the eye height above the feet: VR_CameraHeightScale (cl.viewheight, physical crouch), where the

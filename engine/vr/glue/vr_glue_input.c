@@ -18,8 +18,6 @@ cvar_t	vr_stick_deadzone = {"vr_stick_deadzone", "0.15", CVAR_ARCHIVE};	/* radia
 cvar_t	vr_vignette = {"vr_vignette", "1", CVAR_ARCHIVE};		/* comfort vignette while the sticks move / smooth-turn */
 cvar_t	vr_vignette_strength = {"vr_vignette_strength", "0.6", CVAR_ARCHIVE};	/* 0..1 */
 
-extern	kbutton_t	in_crouch;	/* cl_input.c (not in client.h) */
-
 static void VRG_BindDefaults_f (void);
 static void VRG_MockHand_f (void);
 static void VRG_MockHead_f (void);
@@ -255,11 +253,12 @@ void VRG_InputFrame (void)
 static vr_turn_t	vrg_turn;	/* snap turn state of the main hand's stick */
 
 /* Sticks move and turn only in the running game: not in menus / console / chat, demos, before the
- * signon is done, or in an intermission. */
+ * signon is done, in an intermission or in a camera cutscene (cl.v.cameramode: the player is stuck in
+ * the camera and does not move). */
 static qboolean VRG_StickGameplay (void)
 {
 	return VR_IsRunning () && Key_GetDest () == key_game && !cls.demoplayback &&
-		cls.signon == SIGNONS && !cl.intermission;
+		cls.signon == SIGNONS && !cl.intermission && !cl.v.cameramode;
 }
 
 /* Yaw change (degrees) of the main hand's stick for this frame; VRG_PreInput adds it to the body

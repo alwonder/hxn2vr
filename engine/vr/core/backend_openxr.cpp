@@ -226,7 +226,8 @@ public:
 	BackendInfo info() const override {
 		std::string state = lost_ ? "lost" : stateName(state_);
 		for (char& ch : state) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-		return BackendInfo{"openxr", state, runtime_, format_, {profile_[0], profile_[1]}};
+		return BackendInfo{"openxr", state, runtime_, format_, {profile_[0], profile_[1]},
+		                   appSpaceType_ == XR_REFERENCE_SPACE_TYPE_STAGE};
 	}
 
 	unsigned acquireEye(int eye) override {

@@ -20,7 +20,7 @@
        engine must exit by itself with code 0 before the timeout (no screenshot); the log must also
        have `VR: default controller bindings set` (the VR keys are unbound first, so the defaults are
        set when VR starts). Short waits (WaitLines 3): a stick held for 0.45 s would auto-repeat
-       (the glue counts a long frame as at most 0.1 s, so 3 frames stay below that at any frame rate).
+       (VR_StickRepeat counts a long frame as at most 0.1 s, so 3 frames stay below that at any frame rate).
     m  map demo1, mock controller only -> a modal yes/no dialog answered from the controller: Menu opens
        the main menu, A -> Single Player, A on New Mission opens "start a new game?" (SCR_ModalMessage,
        whose wait loop runs no commands), B pressed 1 s later by a delayed `vr_mock_hand ... 1.0`
@@ -33,7 +33,8 @@
        released, `vr_where` (C). The three `VR: where ...` lines must show A -> B more than 32 units apart
        on the floor plane (the mock's left aim is the identity, so the move follows the body yaw) and a
        yaw change B -> C of -45 (315 mod 360, +-1: one snap turn to the right, once per push). Between
-       B and C: `vr_calibrate` and the main trigger pressed twice (eye height, then arm): the log must have
+       B and C: `vr_calibrate` typed with the console open (toggleconsole first; the command closes it) and the
+       main trigger pressed twice (eye height, then arm): the log must have
        `VR: calibration done: eye height 1.65 m, arm 0.53 m` (the mock head is at 1.65 m, its right hand 0.535 m
        from the shoulder), and C must show no held key (the calibration took the trigger presses).
        Then the room-scale lean: C must show a lean under 0.5 units (the calibration recentered), the mock
@@ -134,7 +135,8 @@ $all = [ordered]@{
             'vr_where',                                                # B
             ('vr_mock_hand right sx 1; ' + ((@('wait') * 20) -join '; ')),   # one snap turn to the right
             ('vr_mock_hand right sx 0; ' + ((@('wait') * 20) -join '; ')),
-            'vr_calibrate',                                            # step 1: stand, look ahead, trigger
+            'toggleconsole',                                           # the command is typed in the console ...
+            'vr_calibrate',                                            # ... which it closes; step 1: stand, look ahead, trigger
             'vr_mock_hand right trigger 1', 'vr_mock_hand right trigger 0',
             'vr_mock_hand right trigger 1', 'vr_mock_hand right trigger 0',   # step 2: arm out, trigger
             'vr_where',                                                # C (also: no key left held by the triggers)
