@@ -43,7 +43,10 @@ typedef struct { double acc; } vr_simclock_t;
  * stopped: running 0, state "stopped", everything else zero. state is the backend's session state
  * (mock: "focused"; OpenXR: idle, ready, synchronized, visible, focused, stopping, lost).
  * frames_per_s / rendered_per_s: VR_BeginFrame calls / frames with render != 0 per second over the
- * last full one-second window (0 when no frame came for 2 s). */
+ * last full one-second window (0 when no frame came for 2 s).
+ * hand_profile[VR_HAND_*]: the hand's current interaction profile (OpenXR: e.g.
+ * "/interaction_profiles/oculus/touch_controller", empty when no controller is bound; mock: always
+ * "mock"); hand_active: VR_GetHand(...).active of the last frame. */
 typedef struct {
 	int   running;
 	char  backend[16];
@@ -52,6 +55,8 @@ typedef struct {
 	char  format[48];
 	int   eye_w, eye_h;
 	float frames_per_s, rendered_per_s;
+	char  hand_profile[2][64];
+	int   hand_active[2];
 } vr_status_t;
 
 int  VR_Start(const vr_host_t *host, const vr_start_params_t *p, char *err, int errlen);

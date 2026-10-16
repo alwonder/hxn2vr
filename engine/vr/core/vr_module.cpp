@@ -250,6 +250,12 @@ void VR_GetStatus(vr_status_t *out) {
 	copy_str(out->format, sizeof out->format, info.swapchainFormat);
 	out->eye_w = size.x;
 	out->eye_h = size.y;
+	for (int h = 0; h < 2; ++h) {
+		copy_str(out->hand_profile[h], sizeof out->hand_profile[h], info.profile[h]);
+		vr_hand_t hand;
+		VR_GetHand(h, &hand);
+		out->hand_active[h] = hand.active ? 1 : 0;
+	}
 	if (host_time() - g_lastFrame < 2.0) {
 		out->frames_per_s = g_fps;
 		out->rendered_per_s = g_renderedFps;

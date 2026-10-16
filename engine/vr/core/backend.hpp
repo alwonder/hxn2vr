@@ -34,6 +34,9 @@ struct BackendInfo {
 	std::string state;             // session state, lower case: idle, ready, synchronized, visible, focused, stopping, lost
 	std::string runtime;           // runtime name and version (OpenXR); empty for the mock
 	std::string swapchainFormat;   // colour format of the eye images
+	// Interaction profile per hand (0 = left, 1 = right). OpenXR: the runtime's current profile path,
+	// empty while no controller is bound; mock: always "mock".
+	std::string profile[2];
 };
 
 // Contract (the caller, vr_module.cpp, guarantees it; backends may rely on it):
@@ -97,6 +100,10 @@ std::unique_ptr<Backend> makeMockBackend(const GlExt*);
 // (STAGE / LOCAL), and on the first begun frame after the session began again after STOPPING
 // (headset off/on). The mock never reports recenter. While the
 // session is not running (IDLE) beginFrame sleeps ~10 ms instead of calling xrWaitFrame.
+// hand(): from the "gameplay" OpenXR action set (suggested bindings: xr_bindings.hpp), synced and
+// located at the predicted display time of each begun FOCUSED frame; inactive on every other frame,
+// when xrSyncActions fails, and when the actions could not be set up at start (which does not fail
+// start()).
 std::unique_ptr<Backend> makeOpenXrBackend(const GlExt*, void (*print)(const char*));
 
 }  // namespace hxvr

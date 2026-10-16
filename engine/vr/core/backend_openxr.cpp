@@ -18,6 +18,7 @@
 
 #include "backend.hpp"
 #include "gl_ext.hpp"
+#include "xr_bindings.hpp"
 #include "xr_logic.hpp"
 
 #include <algorithm>
@@ -49,6 +50,28 @@ Pose toPose(const XrPosef& p) {
 }
 
 Fov toFov(const XrFovf& f) { return Fov{f.angleLeft, f.angleRight, f.angleUp, f.angleDown}; }
+
+// The "gameplay" action set, indexed by Act (xr_bindings.hpp). Every action has both hands as
+// subaction paths.
+struct ActionDesc { const char* name; const char* localized; XrActionType type; };
+constexpr ActionDesc kActions[kActCount] = {
+	{"grip_pose", "Grip pose", XR_ACTION_TYPE_POSE_INPUT},
+	{"aim_pose", "Aim pose", XR_ACTION_TYPE_POSE_INPUT},
+	{"trigger", "Trigger", XR_ACTION_TYPE_FLOAT_INPUT},
+	{"squeeze", "Squeeze", XR_ACTION_TYPE_FLOAT_INPUT},
+	{"thumbstick", "Thumbstick", XR_ACTION_TYPE_VECTOR2F_INPUT},
+	{"thumbstick_click", "Thumbstick click", XR_ACTION_TYPE_BOOLEAN_INPUT},
+	{"lower", "Lower button", XR_ACTION_TYPE_BOOLEAN_INPUT},
+	{"upper", "Upper button", XR_ACTION_TYPE_BOOLEAN_INPUT},
+	{"menu", "Menu", XR_ACTION_TYPE_BOOLEAN_INPUT},
+};
+constexpr const char* kHandPaths[2] = {"/user/hand/left", "/user/hand/right"};
+constexpr const char* kHandNames[2] = {"left", "right"};
+
+constexpr int actIndex(Act a) { return static_cast<int>(a); }
+
+// NaN-safe clamp of a runtime-reported analog value.
+float clampAxis(float v, float lo, float hi) { return std::isfinite(v) ? std::clamp(v, lo, hi) : 0.0f; }
 
 const char* stateName(XrSessionState s) {
 	switch (s) {
@@ -124,6 +147,7 @@ public:
 		eyePose_[0] = eyePose_[1] = head_;
 		const bool ok = createInstance(err) && getSystem(err) && checkGl(err) && createSession(err) &&
 		                createSpaces(err) && createSwapchains(err);
+		if (ok) setupInput();   // never fails the start: without it the session runs without controllers
 		flushDebug();
 		if (!ok) {
 			destroyAll();   // the module never calls stop() after a failed start()
@@ -145,6 +169,7 @@ public:
 		if (frameBegun_) endFrame();   // the contract forbids it; never xrBeginFrame twice
 		frameBegun_ = renderFrame_ = false;
 		eyeDone_[0] = eyeDone_[1] = false;
+		hands_[0] = hands_[1] = HandState{};   // inactive unless this frame syncs them (FOCUSED)
 		if (sess_ == XR_NULL_HANDLE) {
 			fi.lost = true;
 			return fi;
@@ -181,6 +206,7 @@ public:
 		}
 		frameBegun_ = true;
 		displayTime_ = fs.predictedDisplayTime;
+		if (st.focused) updateHands(displayTime_);
 		if (recenterPending_ && displayTime_ >= recenterAt_) {   // poses of this frame are in the changed space
 			recenterPending_ = false;
 			fi.recenter = true;
@@ -195,11 +221,12 @@ public:
 	Pose eyePose(int eye) const override { return eyePose_[eye == 0 ? 0 : 1]; }
 	Fov eyeFov(int eye) const override { return fov_[eye == 0 ? 0 : 1]; }
 	glm::ivec2 eyeSize() const override { return size_; }
+	HandState hand(int h) const override { return hands_[h == 0 ? 0 : 1]; }
 
 	BackendInfo info() const override {
 		std::string state = lost_ ? "lost" : stateName(state_);
 		for (char& ch : state) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-		return BackendInfo{"openxr", state, runtime_, format_};
+		return BackendInfo{"openxr", state, runtime_, format_, {profile_[0], profile_[1]}};
 	}
 
 	unsigned acquireEye(int eye) override {
@@ -668,6 +695,266 @@ private:
 		return true;
 	}
 
+	// --- input ----------------------------------------------------------------------------
+
+	// Same as call() without the glGetError drain: for the per-frame input calls (xrSyncActions,
+	// action states, hand spaces), which never touch GL; keeps ~25 glGetError round trips per frame
+	// off the driver.
+	template <class F>
+	XrResult callInput(const char* what, F&& f, bool log) {
+		const XrResult r = f();
+		if (XR_FAILED(r) && log) say(std::string(what) + " failed: " + resultStr(r));
+		return r;
+	}
+
+	// Action set, actions, suggested bindings, attach, action spaces. Any failure is logged and leaves
+	// the session without controllers (every hand inactive); it never fails start().
+	void setupInput() {
+		if (!createActions()) {
+			destroyInput();
+			say("controllers unavailable: the OpenXR actions could not be created");
+			return;
+		}
+		suggestBindings();
+		XrSessionActionSetsAttachInfo ai{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
+		ai.countActionSets = 1;
+		ai.actionSets = &actionSet_;
+		if (XR_FAILED(call("xrAttachSessionActionSets", [&] { return xrAttachSessionActionSets(sess_, &ai); }))) {
+			destroyInput();
+			say("controllers unavailable: the OpenXR action set could not be attached");
+			return;
+		}
+		// A missing action space only makes that pose never valid (logged by call()).
+		for (int h = 0; h < 2; ++h) {
+			gripSpace_[h] = createActionSpace(Act::GripPose, h);
+			aimSpace_[h] = createActionSpace(Act::AimPose, h);
+		}
+		inputReady_ = true;
+	}
+
+	bool createActions() {
+		for (int h = 0; h < 2; ++h)
+			if (XR_FAILED(call("xrStringToPath", [&] { return xrStringToPath(inst_, kHandPaths[h], &handPath_[h]); })))
+				return false;
+		XrActionSetCreateInfo si{XR_TYPE_ACTION_SET_CREATE_INFO};
+		std::strncpy(si.actionSetName, "gameplay", XR_MAX_ACTION_SET_NAME_SIZE - 1);
+		std::strncpy(si.localizedActionSetName, "Gameplay", XR_MAX_LOCALIZED_ACTION_SET_NAME_SIZE - 1);
+		si.priority = 0;
+		if (XR_FAILED(call("xrCreateActionSet", [&] { return xrCreateActionSet(inst_, &si, &actionSet_); }))) {
+			actionSet_ = XR_NULL_HANDLE;
+			return false;
+		}
+		for (int a = 0; a < kActCount; ++a) {
+			XrActionCreateInfo ci{XR_TYPE_ACTION_CREATE_INFO};
+			std::strncpy(ci.actionName, kActions[a].name, XR_MAX_ACTION_NAME_SIZE - 1);
+			std::strncpy(ci.localizedActionName, kActions[a].localized, XR_MAX_LOCALIZED_ACTION_NAME_SIZE - 1);
+			ci.actionType = kActions[a].type;
+			ci.countSubactionPaths = 2;
+			ci.subactionPaths = handPath_;
+			if (XR_FAILED(call("xrCreateAction", [&] { return xrCreateAction(actionSet_, &ci, &actions_[a]); }))) {
+				actions_[a] = XR_NULL_HANDLE;
+				return false;
+			}
+		}
+		return true;
+	}
+
+	// One suggestion per profile of the table; prints "<profile>: <n> of <m> bindings accepted".
+	void suggestBindings() {
+		for (const ProfileBindings& pb : suggestedBindings()) {
+			XrPath profile = XR_NULL_PATH;
+			std::vector<XrActionSuggestedBinding> cands;
+			if (XR_SUCCEEDED(call("xrStringToPath", [&] { return xrStringToPath(inst_, pb.profile, &profile); }))) {
+				for (const Binding& b : pb.bindings) {
+					XrPath p = XR_NULL_PATH;
+					if (XR_SUCCEEDED(call("xrStringToPath", [&] { return xrStringToPath(inst_, b.path, &p); })))
+						cands.push_back(XrActionSuggestedBinding{actions_[actIndex(b.act)], p});
+				}
+			}
+			const std::size_t accepted = profile != XR_NULL_PATH ? suggestProfile(profile, cands) : 0;
+			say(std::string(pb.profile) + ": " + std::to_string(accepted) + " of " + std::to_string(pb.bindings.size()) +
+			    " bindings accepted");
+		}
+	}
+
+	// All candidates at once; if the runtime refuses, one at a time: each call suggests the accepted
+	// ones plus one candidate, which is dropped when the call fails (a successful call replaces the
+	// profile's previous suggestion). Returns the number accepted.
+	std::size_t suggestProfile(XrPath profile, const std::vector<XrActionSuggestedBinding>& cands) {
+		if (cands.empty()) return 0;
+		const auto suggest = [&](const std::vector<XrActionSuggestedBinding>& v, bool log) {
+			XrInteractionProfileSuggestedBinding sb{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+			sb.interactionProfile = profile;
+			sb.countSuggestedBindings = static_cast<uint32_t>(v.size());
+			sb.suggestedBindings = v.data();
+			return XR_SUCCEEDED(call("xrSuggestInteractionProfileBindings",
+			                         [&] { return xrSuggestInteractionProfileBindings(inst_, &sb); }, log));
+		};
+		if (suggest(cands, true)) return cands.size();
+		std::vector<XrActionSuggestedBinding> ok;
+		bool lastOk = true;
+		for (const XrActionSuggestedBinding& c : cands) {
+			ok.push_back(c);
+			lastOk = suggest(ok, false);
+			if (!lastOk) ok.pop_back();
+		}
+		// The last call failed: suggest the accepted set once more, so it is what the runtime keeps.
+		if (!lastOk && !ok.empty() && !suggest(ok, false)) return 0;
+		return ok.size();
+	}
+
+	XrSpace createActionSpace(Act a, int h) {
+		XrActionSpaceCreateInfo ci{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+		ci.action = actions_[actIndex(a)];
+		ci.subactionPath = handPath_[h];
+		ci.poseInActionSpace.orientation.w = 1.0f;
+		XrSpace s = XR_NULL_HANDLE;
+		if (XR_FAILED(call("xrCreateActionSpace", [&] { return xrCreateActionSpace(sess_, &ci, &s); })))
+			return XR_NULL_HANDLE;
+		return s;
+	}
+
+	// Per FOCUSED frame, after xrBeginFrame (hands_ were reset to inactive by beginFrame). Input
+	// failures are logged once per session; a failed call leaves the hand (or the value) inactive.
+	void updateHands(XrTime t) {
+		if (!inputReady_) return;
+		XrActiveActionSet active{actionSet_, XR_NULL_PATH};
+		XrActionsSyncInfo si{XR_TYPE_ACTIONS_SYNC_INFO};
+		si.countActiveActionSets = 1;
+		si.activeActionSets = &active;
+		const XrResult r = callInput("xrSyncActions", [&] { return xrSyncActions(sess_, &si); }, !inputWarned_);
+		if (!inputOk(r)) return;
+		if (r == XR_SESSION_NOT_FOCUSED) return;   // a success code: focus just went away, hands stay inactive
+		for (int h = 0; h < 2; ++h) hands_[h] = readHand(h, t);
+	}
+
+	bool inputOk(XrResult r) {
+		if (XR_SUCCEEDED(r)) return true;
+		inputWarned_ = true;
+		return false;
+	}
+
+	XrActionStateGetInfo getInfo(Act a, int h) const {
+		XrActionStateGetInfo gi{XR_TYPE_ACTION_STATE_GET_INFO};
+		gi.action = actions_[actIndex(a)];
+		gi.subactionPath = handPath_[h];
+		return gi;
+	}
+
+	// active = the grip pose action is active (a controller is bound to this hand).
+	HandState readHand(int h, XrTime t) {
+		HandState s;
+		XrActionStatePose pose{XR_TYPE_ACTION_STATE_POSE};
+		const XrActionStateGetInfo pi = getInfo(Act::GripPose, h);
+		if (!inputOk(callInput("xrGetActionStatePose", [&] { return xrGetActionStatePose(sess_, &pi, &pose); },
+		                       !inputWarned_)) ||
+		    !pose.isActive)
+			return HandState{};
+		s.active = true;
+		Pose grip = s.grip, aim = s.aim;
+		if (locateHand(gripSpace_[h], t, grip) && locateHand(aimSpace_[h], t, aim)) {
+			s.poseValid = true;
+			s.grip = grip;
+			s.aim = aim;
+		}
+		s.trigger = clampAxis(getFloat(Act::Trigger, h), 0.0f, 1.0f);
+		s.squeeze = clampAxis(getFloat(Act::Squeeze, h), 0.0f, 1.0f);
+		const XrVector2f stick = getVec2(Act::Stick, h);
+		s.stick = glm::vec2(clampAxis(stick.x, -1.0f, 1.0f), clampAxis(stick.y, -1.0f, 1.0f));
+		s.stickClick = getBool(Act::StickClick, h);
+		s.lower = getBool(Act::Lower, h);
+		s.upper = getBool(Act::Upper, h);
+		s.menu = getBool(Act::Menu, h);
+		return s;
+	}
+
+	// True with `out` set only if the space was located with valid orientation and position.
+	bool locateHand(XrSpace sp, XrTime t, Pose& out) {
+		if (sp == XR_NULL_HANDLE) return false;
+		XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
+		if (!inputOk(callInput("xrLocateSpace(hand)", [&] { return xrLocateSpace(sp, appSpace_, t, &loc); },
+		                       !inputWarned_)) ||
+		    !poseFlagsValid(loc.locationFlags))
+			return false;
+		out = toPose(loc.pose);
+		return true;
+	}
+
+	// Unbound / inactive actions read as 0 / false.
+	float getFloat(Act a, int h) {
+		XrActionStateFloat st{XR_TYPE_ACTION_STATE_FLOAT};
+		const XrActionStateGetInfo gi = getInfo(a, h);
+		if (!inputOk(callInput("xrGetActionStateFloat", [&] { return xrGetActionStateFloat(sess_, &gi, &st); },
+		                       !inputWarned_)) ||
+		    !st.isActive)
+			return 0.0f;
+		return st.currentState;
+	}
+
+	XrVector2f getVec2(Act a, int h) {
+		XrActionStateVector2f st{XR_TYPE_ACTION_STATE_VECTOR2F};
+		const XrActionStateGetInfo gi = getInfo(a, h);
+		if (!inputOk(callInput("xrGetActionStateVector2f", [&] { return xrGetActionStateVector2f(sess_, &gi, &st); },
+		                       !inputWarned_)) ||
+		    !st.isActive)
+			return XrVector2f{0.0f, 0.0f};
+		return st.currentState;
+	}
+
+	bool getBool(Act a, int h) {
+		XrActionStateBoolean st{XR_TYPE_ACTION_STATE_BOOLEAN};
+		const XrActionStateGetInfo gi = getInfo(a, h);
+		if (!inputOk(callInput("xrGetActionStateBoolean", [&] { return xrGetActionStateBoolean(sess_, &gi, &st); },
+		                       !inputWarned_)) ||
+		    !st.isActive)
+			return false;
+		return st.currentState == XR_TRUE;
+	}
+
+	// XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED: re-reads both hands' profiles; prints
+	// "<left|right> hand: <profile|none>" for each hand whose profile changed.
+	void updateProfiles() {
+		if (!inputReady_) return;
+		for (int h = 0; h < 2; ++h) {
+			XrInteractionProfileState ps{XR_TYPE_INTERACTION_PROFILE_STATE};
+			std::string name;
+			if (XR_SUCCEEDED(call("xrGetCurrentInteractionProfile",
+			                      [&] { return xrGetCurrentInteractionProfile(sess_, handPath_[h], &ps); })) &&
+			    ps.interactionProfile != XR_NULL_PATH)
+				name = pathStr(ps.interactionProfile);
+			if (name == profile_[h]) continue;
+			profile_[h] = name;
+			if (!stopping_) say(std::string(kHandNames[h]) + " hand: " + (name.empty() ? "none" : name));
+		}
+	}
+
+	std::string pathStr(XrPath p) {
+		char buf[XR_MAX_PATH_LENGTH] = {};
+		uint32_t n = 0;
+		if (XR_FAILED(call("xrPathToString", [&] { return xrPathToString(inst_, p, XR_MAX_PATH_LENGTH, &n, buf); })))
+			return "unknown";
+		buf[XR_MAX_PATH_LENGTH - 1] = '\0';
+		return buf;
+	}
+
+	// Action spaces, then the action set (its actions with it); before the session and instance go.
+	void destroyInput() {
+		for (int h = 0; h < 2; ++h) {
+			for (XrSpace* sp : {&gripSpace_[h], &aimSpace_[h]}) {
+				if (*sp != XR_NULL_HANDLE) call("xrDestroySpace", [&] { return xrDestroySpace(*sp); });
+				*sp = XR_NULL_HANDLE;
+			}
+		}
+		if (actionSet_ != XR_NULL_HANDLE) call("xrDestroyActionSet", [&] { return xrDestroyActionSet(actionSet_); });
+		actionSet_ = XR_NULL_HANDLE;
+		for (XrAction& a : actions_) a = XR_NULL_HANDLE;
+		handPath_[0] = handPath_[1] = XR_NULL_PATH;
+		inputReady_ = inputWarned_ = false;
+		hands_[0] = hands_[1] = HandState{};
+		profile_[0].clear();
+		profile_[1].clear();
+	}
+
 	// --- frame ----------------------------------------------------------------------------
 
 	void pollEvents() {
@@ -699,6 +986,11 @@ private:
 					// the app space is based on STAGE or LOCAL: recenter once the change is in effect
 					if (e->referenceSpaceType == appSpaceType_) requestRecenter(e->changeTime);
 				}
+				break;
+			}
+			case XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED: {
+				const auto* e = reinterpret_cast<const XrEventDataInteractionProfileChanged*>(&ev);
+				if (e->session == sess_) updateProfiles();
 				break;
 			}
 			case XR_TYPE_EVENT_DATA_EVENTS_LOST:
@@ -821,6 +1113,7 @@ private:
 			if (e.sc != XR_NULL_HANDLE) callGl("xrDestroySwapchain", [&] { return xrDestroySwapchain(e.sc); });
 			e = Eye{};
 		}
+		destroyInput();
 		if (viewSpace_ != XR_NULL_HANDLE) call("xrDestroySpace", [&] { return xrDestroySpace(viewSpace_); });
 		if (appSpace_ != XR_NULL_HANDLE) call("xrDestroySpace", [&] { return xrDestroySpace(appSpace_); });
 		if (sess_ != XR_NULL_HANDLE) callGl("xrDestroySession", [&] { return xrDestroySession(sess_); });
@@ -893,6 +1186,17 @@ private:
 	Pose eyePose_[2] = {head_, head_};
 	Fov fov_[2] = {{-0.785f, 0.785f, 0.785f, -0.785f}, {-0.785f, 0.785f, 0.785f, -0.785f}};
 	DebugQueue debug_;
+
+	// Controllers (setupInput / updateHands). inputReady_: the action set is attached.
+	XrActionSet actionSet_ = XR_NULL_HANDLE;
+	XrAction actions_[kActCount] = {};   // indexed by Act
+	XrPath handPath_[2] = {XR_NULL_PATH, XR_NULL_PATH};
+	XrSpace gripSpace_[2] = {XR_NULL_HANDLE, XR_NULL_HANDLE};
+	XrSpace aimSpace_[2] = {XR_NULL_HANDLE, XR_NULL_HANDLE};
+	bool inputReady_ = false;
+	bool inputWarned_ = false;   // an input call failed this session (logged once)
+	HandState hands_[2];         // of the last beginFrame
+	std::string profile_[2];     // current interaction profile per hand; empty = none
 };
 
 }  // namespace

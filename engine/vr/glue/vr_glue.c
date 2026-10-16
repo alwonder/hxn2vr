@@ -879,4 +879,9 @@ static void VRG_Status_f (void)
 	Con_Printf ("VR: eye %dx%d, swapchain format %s\n", st.eye_w, st.eye_h, st.format[0] ? st.format : "n/a");
 	Con_Printf ("VR: %.1f frames/s (%.1f rendered), %.1f server ticks/s\n", st.frames_per_s, st.rendered_per_s,
 			(now - vrg_tick_last < 2.0) ? vrg_ticks_per_s : 0.0f);
+	Con_Printf ("VR: hands left %s (%s), right %s (%s)\n",
+			st.hand_profile[VR_HAND_LEFT][0] ? st.hand_profile[VR_HAND_LEFT] : "none",
+			st.hand_active[VR_HAND_LEFT] ? "active" : "inactive",
+			st.hand_profile[VR_HAND_RIGHT][0] ? st.hand_profile[VR_HAND_RIGHT] : "none",
+			st.hand_active[VR_HAND_RIGHT] ? "active" : "inactive");
 }

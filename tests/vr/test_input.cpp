@@ -4,7 +4,9 @@
 #include "vr_api.h"
 #include "vr_module_testing.hpp"
 
+#include <cstring>
 #include <memory>
+#include <string>
 
 namespace {
 
@@ -287,4 +289,34 @@ TEST_CASE("hands keep their poses when the head offset moves") {
 	VR_MockSetHeadOffset(&target, 0.0f);
 	s.frame();
 	CHECK(get(VR_HAND_RIGHT).grip.pos.z == doctest::Approx(-0.3f));
+}
+
+TEST_CASE("vr_status reports the hand profiles and whether each hand is active") {
+	{
+		Session s;
+		REQUIRE(s.started);
+		s.frame();
+		vr_status_t st{};
+		VR_GetStatus(&st);
+		CHECK(std::string(st.hand_profile[VR_HAND_LEFT]) == "mock");   // the mock's controllers are always "bound"
+		CHECK(std::string(st.hand_profile[VR_HAND_RIGHT]) == "mock");
+		CHECK(st.hand_active[VR_HAND_LEFT] == 1);
+		CHECK(st.hand_active[VR_HAND_RIGHT] == 1);
+
+		vr_hand_t off{};   // inactive
+		VR_MockSetHand(VR_HAND_LEFT, &off);
+		s.frame();
+		VR_GetStatus(&st);
+		CHECK(st.hand_active[VR_HAND_LEFT] == 0);
+		CHECK(st.hand_active[VR_HAND_RIGHT] == 1);
+		CHECK(std::string(st.hand_profile[VR_HAND_LEFT]) == "mock");
+	}
+	vr_status_t st;
+	std::memset(&st, 0x7f, sizeof st);
+	VR_GetStatus(&st);   // stopped: no profiles, no active hands
+	CHECK(st.running == 0);
+	CHECK(st.hand_profile[0][0] == '\0');
+	CHECK(st.hand_profile[1][0] == '\0');
+	CHECK(st.hand_active[0] == 0);
+	CHECK(st.hand_active[1] == 0);
 }

@@ -64,7 +64,7 @@ public:
 	void releaseEye(int) override {}
 	void endFrame() override {}
 	BackendInfo info() const override {
-		return BackendInfo{"mock", "focused", "", gl_ ? "GL_RGBA8 (0x8058)" : "none (no GL)"};
+		return BackendInfo{"mock", "focused", "", gl_ ? "GL_RGBA8 (0x8058)" : "none (no GL)", {"mock", "mock"}};
 	}
 
 	HandState hand(int i) const override { return hands_[i == 0 ? 0 : 1]; }
