@@ -129,6 +129,8 @@ typedef struct client_s
 
 // mission pack, objectives strings
 	unsigned int	info_mask, info_mask2;
+
+	float		hxvr_move[2];	/* HXVR: room-scale move (world units) summed from clc_hxvr until the next physics tick */
 } client_t;
 
 

@@ -584,6 +584,8 @@ void CL_SendMove (const usercmd_t *cmd)
 // light level
 	MSG_WriteByte (&buf, cmd->lightlevel);
 
+	VRG_WriteMoveBlock (&buf);	/* HXVR: clc_hxvr to the local server only */
+
 // deliver the message
 	if (cls.demoplayback)
 		return;

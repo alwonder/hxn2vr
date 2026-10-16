@@ -57,14 +57,22 @@ void VRG_CalibrateReset (void);		/* VR starts / stops: drops a calibration in pr
 
 /* Room-scale on the client: the head's lean from the feet (Quake units, world x/y; the eyes are placed at
  * feet + lean + their offset from the head) and the excess past vr_roomscale_radius that the body should
- * walk (world units; until Task 2.7 dropped every frame). */
+ * walk (world units): summed over the rendered frames until VRG_WriteMoveBlock sends it to the local
+ * server (the block consumes it), dropped whenever the server would not advance the player. */
 extern vr_room_t	vrg_room;
 extern float		vrg_room_excess[2];
-void VRG_RoomReset (void);		/* lean 0, forget the last head */
+void VRG_RoomReset (void);		/* lean 0, forget the last head, drop the excess not yet sent */
+void VRG_RoomStart (void);		/* VRG_Start: VRG_RoomReset and forget the previous session's feet and world */
 /* VRG_UpdateScreen, once per rendered frame before the eyes are placed (feet: r_refdef.vieworg -
  * cl.viewheight after V_SetupRefdef; ignored without a world). Steps the lean; resets it on a new
- * cl.worldmodel and when the feet jumped (VR_BodyJumped). */
+ * cl.worldmodel, when the world comes back (after a frame without one) and when the feet jumped
+ * (VR_BodyJumped). Without a world the head moves freely (no radius); over a world the lean stays within
+ * vr_roomscale_radius, and the excess is added to vrg_room_excess only while VRG_RoomWalking. */
 void VRG_RoomFrame (qboolean world, const vec3_t feet, const vr_vec3_t *head, float upm);
+/* true while the local server advances this player for a room-scale move: VR runs, a local server with
+ * a world, connected and signed on, no demo, not paused (client or server), not in intermission, key_game,
+ * the headset focused and rendering (VRG_ServerTicks runs ticks), vr_roomscale on */
+qboolean VRG_RoomWalking (void);
 float VRG_HeightScale (void);		/* eye height scale above the feet (game crouch): 1 until Task 2.8 */
 
 /* ---- from vr_glue.c, for vr_glue_body.c ---- */

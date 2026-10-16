@@ -263,7 +263,7 @@ static void VRG_Start (void)
 	memset (&vrg_frame, 0, sizeof(vrg_frame));
 	vrg_body_yaw = 0;
 	vrg_body_valid = false;
-	VRG_RoomReset ();
+	VRG_RoomStart ();	/* also forgets the previous session's feet and world */
 	vrg_recenter_pending = true;
 	vrg_panel_valid = false;
 	vrg_panel_reanchor = false;

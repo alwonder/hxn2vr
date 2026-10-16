@@ -152,11 +152,19 @@ static qboolean		vrg_room_feet_valid;		/* ... if there was one */
 static const void	*vrg_room_model;		/* cl.worldmodel of the previous frame (NULL: none) */
 
 /* lean 0 and forget the last head: the head is back over the feet (vr_recenter, setangle, teleport,
- * new level, VR start) */
+ * new level, VR start); the excess not yet sent is dropped (the body must not jump on it) */
 void VRG_RoomReset (void)
 {
 	VR_RoomReset (&vrg_room);
 	vrg_room_excess[0] = vrg_room_excess[1] = 0;
+}
+
+/* VR starts: nothing of a previous session (its last feet and world) is kept */
+void VRG_RoomStart (void)
+{
+	VRG_RoomReset ();
+	vrg_room_feet_valid = false;
+	vrg_room_model = NULL;
 }
 
 /* Scale of the eye height above the feet (game crouch). 1 until the crouch (Task 2.8). */
@@ -165,15 +173,24 @@ float VRG_HeightScale (void)
 	return 1.0f;
 }
 
+qboolean VRG_RoomWalking (void)
+{
+	return VR_IsRunning () && sv.active && cls.state == ca_connected && cls.signon == SIGNONS &&
+		cl.worldmodel && !cls.demoplayback && !cl.paused && !sv.paused && !cl.intermission &&
+		Key_GetDest () == key_game && vrg_frame.focused && vrg_frame.render && vr_roomscale.integer;
+}
+
 /* Once per rendered frame (VRG_UpdateScreen), before the eyes are placed. world: there is a world to
- * draw (feet valid); head: the tracked head (VRG_TrackedPoses). The lean resets on a new world model and
- * when the feet jumped (teleport, respawn, load). In the game (key_game, no intermission) with
- * vr_roomscale the excess past the radius goes to vrg_room_excess; elsewhere the lean only stays within
- * the radius and the excess is dropped. */
+ * draw (feet valid); head: the tracked head (VRG_TrackedPoses). The lean resets on a new world model, when
+ * the world comes back after frames without one (the head moved freely meanwhile) and when the feet jumped
+ * (teleport, respawn, load). Without a world the head moves freely (no radius: nothing to walk or collide
+ * with). Over a world the lean stays within the radius; while the server advances the player
+ * (VRG_RoomWalking) the excess past it is summed into vrg_room_excess for the next move block, otherwise
+ * it is dropped (and so is any excess not yet sent): the head stops at the radius. */
 void VRG_RoomFrame (qboolean world, const vec3_t feet, const vr_vec3_t *head, float upm)
 {
 	const void	*model = (cls.state == ca_connected) ? (const void *) cl.worldmodel : NULL;
-	float		excess[2];
+	float		excess[2], radius;
 
 	if (model != vrg_room_model)
 	{
@@ -181,7 +198,7 @@ void VRG_RoomFrame (qboolean world, const vec3_t feet, const vr_vec3_t *head, fl
 		vrg_room_model = model;
 		vrg_room_feet_valid = false;
 	}
-	else if (world && vrg_room_feet_valid && VR_BodyJumped (vrg_room_feet, feet))
+	else if (world && (!vrg_room_feet_valid || VR_BodyJumped (vrg_room_feet, feet)))
 	{
 		VRG_RoomReset ();
 	}
@@ -190,15 +207,46 @@ void VRG_RoomFrame (qboolean world, const vec3_t feet, const vr_vec3_t *head, fl
 	vrg_room_feet_valid = world;
 
 	VRG_CheckRange (&vr_roomscale_radius, 0.0f, 3.0f, false, &vrg_room_radius, &vrg_room_radius_warned);
-	/* until Task 2.7 the body does not walk: the excess of one frame is dropped at the next one and
-	 * the head stops at the radius */
-	vrg_room_excess[0] = vrg_room_excess[1] = 0;
-	VR_RoomStep (&vrg_room, head, vrg_body_yaw, upm, vrg_room_radius * upm, excess);
-	if (world && Key_GetDest () == key_game && !cl.intermission && vr_roomscale.integer)
+	radius = world ? vrg_room_radius * upm : 1.0e30f;	/* no world: the head moves freely */
+	VR_RoomStep (&vrg_room, head, vrg_body_yaw, upm, radius, excess);
+	if (world && VRG_RoomWalking ())
 	{
 		vrg_room_excess[0] += excess[0];
 		vrg_room_excess[1] += excess[1];
 	}
+	else
+	{
+		vrg_room_excess[0] = vrg_room_excess[1] = 0;
+	}
+}
+
+/* CL_SendMove: the VR move block for the local server (stock servers never see clc_hxvr). The block takes
+ * the excess summed since the last one; if the server would not advance the player now, the excess is
+ * dropped instead. Blocks written into a move CL_SendMove does not send (the first two of a level) lose
+ * their excess. */
+void VRG_WriteMoveBlock (sizebuf_t *buf)
+{
+	vr_moveblock_t	b;
+	unsigned char	blk[VR_MOVEBLOCK_MAX];
+	int		n;
+
+	if (!VR_IsRunning () || !sv.active || cls.state != ca_connected || cls.demoplayback)
+		return;
+	memset (&b, 0, sizeof(b));
+	b.version = VR_MOVEBLOCK_VERSION;
+	if (VRG_RoomWalking () && (vrg_room_excess[0] != 0 || vrg_room_excess[1] != 0))
+	{
+		b.flags |= VR_MOVE_ROOMSCALE;
+		b.roomscale[0] = vrg_room_excess[0];
+		b.roomscale[1] = vrg_room_excess[1];
+	}
+	vrg_room_excess[0] = vrg_room_excess[1] = 0;
+	n = VR_WriteMoveBlock (&b, blk, (int) sizeof(blk));
+	if (n <= 0 || buf->cursize + 2 + n > buf->maxsize)
+		return;
+	MSG_WriteByte (buf, clc_hxvr);
+	MSG_WriteByte (buf, n);
+	SZ_Write (buf, blk, n);
 }
 
 /* ---- vr_body ---- */

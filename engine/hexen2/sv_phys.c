@@ -21,6 +21,7 @@
  */
 
 #include "quakedef.h"
+#include "vr_api.h"	/* HXVR: VR_RoomscaleMoveOk */
 
 /*
 
@@ -1653,6 +1654,57 @@ static void SV_WalkMove (edict_t *ent)
 }
 
 
+/* HXVR: the room-scale move a VR client sent (clc_hxvr, summed since the last tick): the body walks
+ * where the player walked in the room, with the collision of the player's own movetype. It is taken
+ * (and cleared) once per physics tick; an empty, oversized or non-finite move, a dead player or a
+ * movetype that does not walk is dropped. The player's velocity is unchanged. */
+static void SV_HXVR_RoomscaleMove (edict_t *ent, client_t *cl)
+{
+	float	move[2];
+	vec3_t	oldvel;
+	int	onground;
+
+	move[0] = cl->hxvr_move[0];
+	move[1] = cl->hxvr_move[1];
+	cl->hxvr_move[0] = cl->hxvr_move[1] = 0;
+	if ((move[0] == 0 && move[1] == 0) || !VR_RoomscaleMoveOk (move) || ent->v.health <= 0 ||
+	    !(host_frametime > 0))
+		return;
+	switch ((int)ent->v.movetype)
+	{
+	case MOVETYPE_WALK:
+	case MOVETYPE_FLY:
+	case MOVETYPE_SWIM:
+	case MOVETYPE_NOCLIP:
+		break;
+	default:
+		return;
+	}
+
+	VectorCopy (ent->v.velocity, oldvel);
+	ent->v.velocity[0] = move[0] / host_frametime;
+	ent->v.velocity[1] = move[1] / host_frametime;
+	ent->v.velocity[2] = 0;
+	switch ((int)ent->v.movetype)
+	{
+	case MOVETYPE_WALK:
+		onground = (int)ent->v.flags & FL_ONGROUND;
+		SV_CheckStuck (ent);
+		SV_WalkMove (ent);
+		ent->v.flags = ((int)ent->v.flags & ~FL_ONGROUND) | onground;
+		break;
+	case MOVETYPE_FLY:
+	case MOVETYPE_SWIM:
+		SV_FlyMove (ent, host_frametime, NULL);
+		break;
+	case MOVETYPE_NOCLIP:
+		ent->v.origin[0] += move[0];
+		ent->v.origin[1] += move[1];
+		break;
+	}
+	VectorCopy (oldvel, ent->v.velocity);
+}	/* HXVR */
+
 /*
 ================
 SV_Physics_Client
@@ -1726,6 +1778,8 @@ static void SV_Physics_Client (edict_t *ent, int num)
 	default:
 		Sys_Error ("%s: bad movetype %i", __thisfunc__, (int)ent->v.movetype);
 	}
+
+	SV_HXVR_RoomscaleMove (ent, &svs.clients[num-1]);	/* HXVR */
 
 //
 // call standard player post-think

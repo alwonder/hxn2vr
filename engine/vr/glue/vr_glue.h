@@ -67,6 +67,15 @@ void VRG_StickMove (usercmd_t *cmd);	/* CL_BaseMove, after the keyboard terms: t
 void VRG_PostInput (void);	/* after IN_Move: body_yaw = cl.viewangles[YAW]; cl.viewangles = body + head */
 void VRG_OnSetAngle (void);	/* after svc_setangle(_interpolate): body_yaw = server yaw - head yaw */
 
+/* VR move block (clc_hxvr: u8 len, len bytes; vr_api.h VR_WriteMoveBlock). Sent only to the local server. */
+/* CL_SendMove, after the light level: while VR runs, a local server is active, the client is connected and
+ * no demo plays, appends the block with the room-scale move walked since the last block (vrg_room_excess,
+ * taken: the block consumes it; dropped instead when the server would not advance the player). */
+void VRG_WriteMoveBlock (sizebuf_t *buf);
+/* SV_ReadClientMessage, case clc_hxvr: reads the block; its room-scale move adds to cl->hxvr_move
+ * (vr_glue_server.c; sv_phys.c applies the sum on the next physics tick). */
+void VRG_ServerReadMoveBlock (client_t *cl);
+
 /* Implemented by the video driver (gl_vidnt.c): blocks sound while the window is unfocused, except
  * while a VR session runs. The glue calls it when VR starts / stops. */
 void VID_VRSoundFocus (void);

@@ -117,6 +117,7 @@
 #define	clc_stringcmd		4	// [string] message
 #define	clc_inv_select		5
 #define	clc_frame		6
+#define	clc_hxvr		16	/* HXVR: [u8 len] [len bytes VR move block], only to the local server */
 
 //==============================================
 

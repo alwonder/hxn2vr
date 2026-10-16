@@ -24,6 +24,7 @@ add_library(hxvr STATIC
     ${HXVR_DIR}/core/vr_math.cpp
     ${HXVR_DIR}/core/vr_input.cpp
     ${HXVR_DIR}/core/vr_body.cpp
+    ${HXVR_DIR}/core/vr_netblock.cpp
     ${HXVR_DIR}/core/backend_mock.cpp
     ${HXVR_DIR}/core/gl_ext.cpp
     ${HXVR_DIR}/core/targets.cpp
@@ -60,6 +61,7 @@ add_executable(vr_tests
     ${CMAKE_SOURCE_DIR}/tests/vr/test_xr_bindings.cpp
     ${CMAKE_SOURCE_DIR}/tests/vr/test_body.cpp
     ${CMAKE_SOURCE_DIR}/tests/vr/test_room.cpp
+    ${CMAKE_SOURCE_DIR}/tests/vr/test_netblock.cpp
 )
 target_compile_features(vr_tests PRIVATE cxx_std_20)
 set_target_properties(vr_tests PROPERTIES CXX_EXTENSIONS OFF MSVC_RUNTIME_LIBRARY "${HXVR_MSVC_RUNTIME}")

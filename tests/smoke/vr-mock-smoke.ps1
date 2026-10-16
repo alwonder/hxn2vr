@@ -40,6 +40,13 @@
        head is moved 0.2 m forward over 1 s (`vr_mock_head 0 0 -0.2 1`) and `vr_where` (D) must show a
        horizontal lean of 7.27 +- 0.5 units (0.2 m x 36.36 units/m, inside the 9.09-unit radius) pointing
        along the body yaw of D (+-5 deg: the lean is in world axes).
+    h  map demo1, mock controller only -> room-scale walking on the server (clc_hxvr): `vr_where` (A), the mock
+       head walks 1 m forward over 2 s (`vr_mock_head 0 0 -1 2`), `vr_where` (B). The head leans up to the
+       0.25 m radius (9.09 units), the remaining 0.75 m (27 units) goes to the local server in the VR move
+       block and the server walks the player with collision: A -> B must be at least 20 units apart on the
+       floor plane, and the lean at B must be at the radius (9.09 +- 0.5 units). 2 s, not 1: the Debug exe
+       can run the mock at ~6 frames/s, and one frame of more than 0.5 s at 1 m/s would be a head step over
+       0.5 m, which the room-scale code drops as a tracking jump. 300 waits: >= 2 s also at the mock's 90 Hz.
 
   check_shot --stereo alone cannot prove VR ran, so every run also uses -condebug and the
   console log must contain `VR: started (mock)` and no `VR:` error line (`VR: recentered` is allowed;
@@ -62,7 +69,7 @@
 [CmdletBinding()]
 param(
     [string]$Exe = 'build/win64/Debug/hxn2vr.exe',
-    [string[]]$Scenarios = @('a', 'b', 'c', 'd', 'e', 'f', 'g', 'm'),
+    [string[]]$Scenarios = @('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'm'),
     [string]$GameDir = 'build/game',
     [switch]$IncludePending,
     [int]$TimeoutSec = 180,
@@ -119,6 +126,16 @@ $all = [ordered]@{
             ((@('wait') * 150) -join '; '),
             'vr_where');                                               # D: lean ~7.27 units along the body yaw
         Stereo = $true; Where = $true; Calibrate = $true; WaitLines = 3; Pending = $false }
+    # room-scale walk (see the header): the vr_where lines A, B are checked in Test-VrLog
+    h = @{ Commands = @(
+            'map demo1', ((@('wait') * 150) -join '; '),             # the level is in
+            'menu_main; togglemenu',                                   # no menu, whatever the start did
+            'vr_where',                                                # A
+            'vr_mock_head 0 0 -1 2',                                   # the head walks 1 m forward over 2 s
+            ((@('wait') * 150) -join '; '),                            # 300 frames: >= 2 s at the mock's 90 Hz
+            ((@('wait') * 150) -join '; '),
+            'vr_where');                                               # B: the body walked ~27 units
+        Stereo = $true; RoomWalk = $true; WaitLines = 3; Pending = $false }
     # quit from the controller in the main menu (no map). The first line runs before VR starts (same
     # command buffer pass as +vr_enabled 1); the mock commands run once it is up. Hexen.rc opens the
     # main menu at startup (menu_main): `menu_main; togglemenu` closes it whatever Hexen.rc did, so
@@ -207,6 +224,22 @@ function Test-VrLog([string]$path, $sc) {
         $dYaw = (($leanYaw - $p[3].Yaw) % 360 + 540) % 360 - 180
         if ([math]::Abs($dYaw) -gt 5) { return "lean at D points at $leanYaw deg, expected along the body yaw $($p[3].Yaw) +- 5: $($w[3])" }
     }
+    if ($sc.RoomWalk) {
+        $re = '^VR: where origin (\S+) (\S+) (\S+) yaw (\S+) lean (\S+) (\S+) view '
+        $w = @($vrLines | Where-Object { $_ -cmatch $re })
+        if ($w.Count -ne 2) { return "expected 2 'VR: where' lines (A, B), found $($w.Count): $($w -join ' | ')" }
+        $p = @()
+        foreach ($l in $w) {
+            [void]($l -cmatch $re)
+            $p += ,@{ X = [double]::Parse($Matches[1], [cultureinfo]::InvariantCulture); Y = [double]::Parse($Matches[2], [cultureinfo]::InvariantCulture)
+                      LeanX = [double]::Parse($Matches[5], [cultureinfo]::InvariantCulture); LeanY = [double]::Parse($Matches[6], [cultureinfo]::InvariantCulture) }
+        }
+        $dist = [math]::Sqrt([math]::Pow($p[1].X - $p[0].X, 2) + [math]::Pow($p[1].Y - $p[0].Y, 2))
+        $leanB = [math]::Sqrt([math]::Pow($p[1].LeanX, 2) + [math]::Pow($p[1].LeanY, 2))
+        Write-Host ("vr-mock-smoke: room-scale walk A->B {0:N1} units, lean B {1:N2} units" -f $dist, $leanB)
+        if ($dist -lt 20) { return "the room-scale walk moved the player only $dist units (A -> B), expected at least 20: $($w -join ' | ')" }
+        if ([math]::Abs($leanB - 9.09) -gt 0.5) { return "lean $leanB units at B, expected the 9.09-unit radius +- 0.5: $($w[1])" }
+    }
     # Expected VR: lines are the start/stop/recenter/default-bindings notices (and vr_where output); anything else is an error report.
     $bad = @($vrLines | Where-Object { $_ -cne 'VR: started (mock)' -and $_ -cne 'VR: stopped' -and $_ -cne 'VR: recentered' -and
         $_ -cne 'VR: default controller bindings set' -and $_ -cnotmatch '^VR: where ' -and
@@ -218,7 +251,7 @@ function Test-VrLog([string]$path, $sc) {
 $failed = @()
 $results = @()
 foreach ($s in $Scenarios) {
-    if (-not $all.Contains($s)) { throw "unknown scenario '$s' (a, b, c, d, e, f, g, m)" }
+    if (-not $all.Contains($s)) { throw "unknown scenario '$s' (a, b, c, d, e, f, g, h, m)" }
     $sc = $all[$s]
     if ($sc.Pending -and -not $IncludePending) {
         Write-Host "vr-mock-smoke ($s): PENDING (skipped; -IncludePending to run)"

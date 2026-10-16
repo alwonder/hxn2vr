@@ -21,6 +21,7 @@
  */
 
 #include "quakedef.h"
+#include "vr_glue.h"	/* HXVR */
 
 edict_t	*sv_player = NULL;
 
@@ -799,6 +800,10 @@ nextmsg:
 				host_client->last_frame = MSG_ReadByte();
 				host_client->last_sequence = MSG_ReadByte();
 				break;
+
+			case clc_hxvr:	/* HXVR */
+				VRG_ServerReadMoveBlock (host_client);	/* HXVR */
+				break;	/* HXVR */
 			}
 		}
 	} while (ret == 1);
@@ -833,6 +838,7 @@ void SV_RunClients (void)
 		{
 		// clear client movement until a new packet is received
 			memset (&host_client->cmd, 0, sizeof(host_client->cmd));
+			host_client->hxvr_move[0] = host_client->hxvr_move[1] = 0;	/* HXVR */
 			continue;
 		}
 
