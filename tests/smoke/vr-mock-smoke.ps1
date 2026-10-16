@@ -40,6 +40,9 @@
        head is moved 0.2 m forward over 1 s (`vr_mock_head 0 0 -0.2 1`) and `vr_where` (D) must show a
        horizontal lean of 7.27 +- 0.5 units (0.2 m x 36.36 units/m, inside the 9.09-unit radius) pointing
        along the body yaw of D (+-5 deg: the lean is in world axes).
+       The checked picture (hexen00) is the `screenshot` taken just before the left stick is released, with the
+       default `vr_vignette 1`: the comfort vignette is on screen and the shot must still pass check_shot --stereo.
+       (The final screenshot of the run-smoke wrapper is hexen01 and is not checked.)
     h  map demo1, mock controller only -> room-scale walking on the server (clc_hxvr): `vr_where` (A), the mock
        head walks 1 m forward over 2 s (`vr_mock_head 0 0 -1 2`), `vr_where` (B). The head leans up to the
        0.25 m radius (9.09 units), the remaining 0.75 m (27 units) goes to the local server in the VR move
@@ -126,7 +129,7 @@ $all = [ordered]@{
             'menu_main; togglemenu',                                   # no menu, whatever the start did
             'vr_where',                                                # A
             ('vr_mock_hand left sy 1; ' + ((@('wait') * 150) -join '; ')),   # ~2 s forward ...
-            'vr_mock_hand left sy 0',                                  # ... then stop
+            'screenshot; vr_mock_hand left sy 0',                      # the picture while the stick is pushed (comfort vignette), then stop
             ((@('wait') * 20) -join '; '),
             'vr_where',                                                # B
             ('vr_mock_hand right sx 1; ' + ((@('wait') * 20) -join '; ')),   # one snap turn to the right

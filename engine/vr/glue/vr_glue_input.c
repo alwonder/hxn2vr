@@ -15,6 +15,8 @@ cvar_t	vr_turn_mode = {"vr_turn_mode", "0", CVAR_ARCHIVE};		/* 0 snap, 1 smooth 
 cvar_t	vr_snap_angle = {"vr_snap_angle", "45", CVAR_ARCHIVE};		/* degrees */
 cvar_t	vr_turn_speed = {"vr_turn_speed", "150", CVAR_ARCHIVE};	/* degrees per second (smooth) */
 cvar_t	vr_stick_deadzone = {"vr_stick_deadzone", "0.15", CVAR_ARCHIVE};	/* radial */
+cvar_t	vr_vignette = {"vr_vignette", "1", CVAR_ARCHIVE};		/* comfort vignette while the sticks move / smooth-turn */
+cvar_t	vr_vignette_strength = {"vr_vignette_strength", "0.6", CVAR_ARCHIVE};	/* 0..1 */
 
 extern	kbutton_t	in_crouch;	/* cl_input.c (not in client.h) */
 
@@ -32,6 +34,8 @@ void VRG_InputInit (void)
 	Cvar_RegisterVariable (&vr_snap_angle);
 	Cvar_RegisterVariable (&vr_turn_speed);
 	Cvar_RegisterVariable (&vr_stick_deadzone);
+	Cvar_RegisterVariable (&vr_vignette);
+	Cvar_RegisterVariable (&vr_vignette_strength);
 	Cmd_AddCommand ("vr_where", VRG_Where_f);
 	Cmd_AddCommand ("vr_bind_defaults", VRG_BindDefaults_f);
 	Cmd_AddCommand ("vr_mock_hand", VRG_MockHand_f);
@@ -300,6 +304,46 @@ void VRG_StickMove (usercmd_t *cmd)
 	cmd->sidemove += move[1];
 }
 
+/* ---- comfort vignette ---- */
+
+static float		vrg_vignette;		/* 0..1: how much of the vignette strength is applied now */
+static double		vrg_vignette_time;	/* host time of the previous VRG_VignetteAmount (0: none) */
+
+/* VRG_UpdateScreen, once per rendered frame: the vignette amount, 0..1. The target is the larger of the
+ * movement stick's deflection (off hand, after the deadzone) and, with smooth turning, the turn stick's
+ * x deflection (main hand, after the deadzone) in the running game, else 0; the amount follows it at 5/s
+ * (the fade in and out is not instant, so it does not flicker with the stick). */
+float VRG_VignetteAmount (void)
+{
+	const double	now = Sys_DoubleTime ();
+	const float	dt = vrg_vignette_time > 0 ? (float) (now - vrg_vignette_time) : 0.0f;
+	float		target = 0.0f;
+
+	vrg_vignette_time = now;
+	if (VRG_StickGameplay ())
+	{
+		vr_hand_t	main_h, other;
+		float		in[2], out[2];
+
+		VR_GetHand (VRG_MainHand (), &main_h);
+		VR_GetHand (1 - VRG_MainHand (), &other);
+		if (other.active)
+		{
+			VR_StickDeadzone (other.stick, vr_stick_deadzone.value, out);
+			target = sqrtf (out[0] * out[0] + out[1] * out[1]);
+		}
+		if (main_h.active && vr_turn_mode.integer != 0)
+		{
+			in[0] = main_h.stick[0];
+			in[1] = 0.0f;
+			VR_StickDeadzone (in, vr_stick_deadzone.value, out);
+			target = q_max (target, fabsf (out[0]));
+		}
+	}
+	vrg_vignette = VR_Approach (vrg_vignette, q_min (target, 1.0f), 5.0f, dt);
+	return vrg_vignette;
+}
+
 /* vr_where: one line with the player's state, for the smoke tests (see the Where scenarios). */
 static void VRG_Where_f (void)
 {
@@ -359,6 +403,8 @@ void VRG_InputStart (void)
 	memset (vrg_in_key, 0, sizeof(vrg_in_key));
 	memset (vrg_in_repeat, 0, sizeof(vrg_in_repeat));
 	memset (&vrg_turn, 0, sizeof(vrg_turn));
+	vrg_vignette = 0;
+	vrg_vignette_time = 0;
 	vrg_in_main = VRG_MainHand ();
 	vrg_in_time = Sys_DoubleTime ();
 	VRG_MockHandsReset ();

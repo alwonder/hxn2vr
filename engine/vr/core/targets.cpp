@@ -2,6 +2,7 @@
 #include "targets.hpp"
 
 #include "gl_ext.hpp"
+#include "vr_comfort.hpp"
 
 namespace hxvr {
 
@@ -183,16 +184,7 @@ void PanelTarget::drawQuad(const float corners[4][3]) {
 	// texture binding and environment, current colour); the engine's state is restored by the pop.
 	gl_->glPushAttrib(gl::kEnableBit | gl::kColorBufferBit | gl::kDepthBufferBit | gl::kTextureBit |
 	                  gl::kCurrentBit | gl::kPolygonBit);
-	gl_->glDisable(gl::kDepthTest);
-	gl_->glDisable(gl::kCullFace);
-	gl_->glDisable(gl::kAlphaTest);
-	gl_->glDisable(gl::kLighting);
-	gl_->glDisable(gl::kFog);
-	gl_->glDisable(gl::kStencilTest);
-	gl_->glDisable(gl::kScissorTest);
-	gl_->glDepthMask(0);
-	gl_->glEnable(gl::kBlend);
-	gl_->glBlendFunc(gl::kSrcAlpha, gl::kOneMinusSrcAlpha);
+	setOverlayState(*gl_);   // shared with the fade and the vignette (vr_comfort.cpp)
 	gl_->glEnable(gl::kTexture2D);
 	gl_->glBindTexture(gl::kTexture2D, tex_);
 	gl_->glTexEnvf(gl::kTextureEnv, gl::kTextureEnvMode, static_cast<gl::GLfloat>(gl::kModulate));

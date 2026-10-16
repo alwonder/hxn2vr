@@ -344,6 +344,14 @@ void VR_DrawFade(float alpha) {
 	if (!g_backend || !g_glLoaded || !(g_eyeBound[0] || g_eyeBound[1])) return;
 	hxvr::drawFade(g_gl, alpha);
 }
+void VR_DrawVignette(int eye, float inner) {
+	if (!g_backend || !g_glLoaded || eye < 0 || eye > 1 || !g_eyeBound[eye]) return;
+	const hxvr::Fov f = g_backend->eyeFov(eye);
+	const vr_fov_t fov{f.left, f.right, f.up, f.down};
+	float c[2];
+	VR_VignetteCenter(&fov, c);
+	hxvr::drawVignette(g_gl, c[0], c[1], inner);
+}
 
 }  // extern "C"
 

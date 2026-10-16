@@ -25,6 +25,8 @@ extern	cvar_t	vr_turn_mode;		/* 0 snap, 1 smooth */
 extern	cvar_t	vr_snap_angle;
 extern	cvar_t	vr_turn_speed;
 extern	cvar_t	vr_stick_deadzone;
+extern	cvar_t	vr_vignette;		/* 1: comfort vignette while the sticks move / smooth-turn */
+extern	cvar_t	vr_vignette_strength;	/* 0..1 */
 extern	cvar_t	vr_seated;		/* vr_glue_body.c: 1 = seated mode */
 extern	cvar_t	vr_height_offset;	/* metres, added to the y of head, eyes and hands (VRG_TrackedPoses) */
 extern	cvar_t	vr_body_arm_length;	/* metres, 0 = from the proportions */

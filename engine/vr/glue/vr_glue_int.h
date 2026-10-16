@@ -34,6 +34,9 @@ void VRG_ReleaseAllKeys (void);
 /* VRG_PreInput: yaw change (degrees, Quake yaw) from the main hand's stick this frame (snap or smooth
  * turn); 0 outside the running game. */
 float VRG_TurnStep (void);
+/* VRG_UpdateScreen, once per rendered frame: the vignette amount 0..1 (stick deflection, see the .c file),
+ * smoothed at 5/s. */
+float VRG_VignetteAmount (void);
 /* true while VRG_ModalFrame runs its frame: VRG_InputFrame then maps the buttons to the dialog's
  * 'y' / 'n' instead of the key_dest routing, and skips the menu stick arrows */
 extern qboolean		vrg_input_modal;

@@ -630,7 +630,7 @@ qboolean VRG_UpdateScreen (void)
 	int		eye, numvis = 0;
 	qboolean	world, panel;
 	vec3_t		feet, save_org, save_ang, head_ang, eye_org, eye_ang, head_org, head_view;
-	float		body_yaw, upm, hscale, fade, shift_z;
+	float		body_yaw, upm, hscale, fade, shift_z, vignette, amount;
 	float		corners[4][3];
 	vr_pose_t	head, eyes[2];
 
@@ -669,6 +669,8 @@ qboolean VRG_UpdateScreen (void)
 	VR_EyeOrigin (feet, body_yaw, vrg_room.lean, &head.pos, &head.pos, upm, hscale, head_org);
 	/* once per frame at the head's centre: kept under the ceiling (both eyes move with it), fade in walls */
 	fade = VRG_HeadCollide (world, feet, head_org, &shift_z);
+	amount = VRG_VignetteAmount ();	/* followed also with the vignette off: no jump when it is turned on */
+	vignette = vr_vignette.integer ? VR_VignetteInner (vr_vignette_strength.value, amount) : 1.5f;
 	VR_TrackingToQuakeAngles (&head.rot, head_ang);
 	VR_ComposeViewAngles (body_yaw, head_ang, head_view);
 	VRG_PanelPlace (world, feet, body_yaw, upm, head_org, head_view, corners);
@@ -698,7 +700,9 @@ qboolean VRG_UpdateScreen (void)
 			{
 				VRG_ClearColor (0.05f, 0.05f, 0.05f, GL_DEPTH_BUFFER_BIT);
 			}
-			/* world, (vignette: Task 2.9), fade, panel: the menus stay visible in the dark */
+			/* world, vignette, fade, panel: the menus stay visible in the dark */
+			if (vignette < 1.45f)
+				VR_DrawVignette (eye, vignette);
 			VR_DrawFade (fade);
 			if (panel)
 				VRG_DrawPanel ((const float (*)[3]) corners, eye_org, eye_ang);

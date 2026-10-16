@@ -184,6 +184,18 @@ float VR_Approach(float cur, float target, float rate_per_s, float dt);
  * and both matrices) is restored. Call it between VR_BeginEye and VR_EndEye (no-op otherwise). */
 void  VR_DrawFade(float alpha);
 
+/* Comfort vignette. NDC radius of the clear area: 1.5 - 0.9 * clamp(strength) * clamp(amount) (a non-finite
+ * argument counts as 0); >= 1.45 means nothing to draw. */
+float VR_VignetteInner(float strength, float amount);
+/* NDC of the view direction in an eye with this (asymmetric) FOV: x = -(tan r + tan l) / (tan r - tan l),
+ * the same for y with up / down; (0, 0) for a NULL or degenerate fov. */
+void  VR_VignetteCenter(const vr_fov_t *fov, float out[2]);
+/* Black ring around the eye's view centre (VR_VignetteCenter of that eye's FOV): alpha 0 at `inner`, 1 at
+ * inner + 0.35, solid black out to radius 3; 48 segments, immediate mode, GL state restored as in
+ * VR_DrawFade. Nothing for inner >= 1.45. Call it between VR_BeginEye and VR_EndEye (no-op otherwise);
+ * after the world, before VR_DrawFade and the panel. */
+void  VR_DrawVignette(int eye, float inner);
+
 /* Room-scale on the client (pure functions). The head leans away from the body's centre (the feet) in world
  * axes, so turning the body does not move the head; past the radius the body should walk the excess. */
 typedef struct { float lean[2]; vr_vec3_t last_head; int has_last; } vr_room_t;   /* lean: Quake units, world x/y */
