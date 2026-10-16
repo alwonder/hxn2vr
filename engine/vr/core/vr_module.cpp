@@ -5,6 +5,7 @@
 #include "backend.hpp"
 #include "gl_ext.hpp"
 #include "targets.hpp"
+#include "vr_input.hpp"
 #include "vr_module_testing.hpp"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -161,6 +162,8 @@ void finish_frame() {
 
 }  // namespace
 
+hxvr::Backend* hxvr::activeBackend() { return g_backend.get(); }
+
 extern "C" {
 
 int  VR_Start(const vr_host_t *host, const vr_start_params_t *p, char *err, int errlen) {
@@ -204,6 +207,7 @@ int  VR_Start(const vr_host_t *host, const vr_start_params_t *p, char *err, int 
 		return 0;
 	}
 	g_backend = std::move(backend);
+	hxvr::inputReset();
 	g_ctx = wglGetCurrentContext();
 	if (gl) {
 		g_targets = std::make_unique<hxvr::EyeTargets>(gl);
@@ -221,6 +225,7 @@ void VR_Stop(void) {
 		g_backend->stop();
 		g_backend.reset();
 	}
+	hxvr::inputReset();
 	release_targets();   // the GL context is still current: VR stops before the window / context goes away
 	g_framePending = false;
 	g_frameRender = false;
@@ -256,6 +261,7 @@ int  VR_BeginFrame(vr_frame_t *out) {
 	finish_frame();   // a frame left pending (longjmp, or the screen was not drawn) ends first
 	const double now = host_time();
 	const hxvr::FrameInfo fi = g_backend->beginFrame(now);
+	hxvr::inputUpdate(*g_backend);
 	count_frame(now, fi.render);
 	g_framePending = true;
 	g_frameRender = fi.render;
@@ -334,6 +340,7 @@ void VR_TestInjectBackend(std::unique_ptr<hxvr::Backend> backend) {
 	g_host = vr_host_t{};
 	g_glLoaded = false;
 	g_backend = std::move(backend);
+	hxvr::inputReset();
 	g_framePending = false;
 	g_frameRender = false;
 	g_ctx = wglGetCurrentContext();

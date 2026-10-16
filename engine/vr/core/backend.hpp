@@ -14,6 +14,17 @@ struct GlExt;   // GL entry points (gl_ext.hpp). Backends keep the pointer; it m
 
 struct Pose { glm::vec3 pos; glm::quat rot; };   // metres, OpenXR axes, relative to the floor
 struct Fov { float left, right, up, down; };      // radians, left/down < 0
+// Raw controller state of one hand, as of the last beginFrame. Metres, tracking space. The module
+// (vr_input.cpp) derives the VR_BTN_TRIGGER / VR_BTN_GRIP bits from trigger / squeeze with hysteresis.
+struct HandState {
+	bool active = false;      // a controller is bound and its pose action is active
+	bool poseValid = false;   // grip and aim located this frame (orientation and position valid)
+	Pose grip{glm::vec3(0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f)};
+	Pose aim{glm::vec3(0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f)};
+	float trigger = 0, squeeze = 0;   // 0..1
+	glm::vec2 stick{0.0f};            // x right, y up, -1..1, raw
+	bool lower = false, upper = false, stickClick = false, menu = false;
+};
 // recenter: the tracking origin moved since the previous beginFrame (vr_frame_t::recenter).
 struct FrameInfo { bool render; bool focused; bool lost; bool recenter = false; };
 struct StartParams { float renderScale; float eyeHeightM; bool mockMotion; float mockHz; };
@@ -63,6 +74,14 @@ public:
 	// Additive (not part of the frame contract): facts for vr_status. May be called any time between
 	// start() and stop(); never touches GL or the runtime.
 	virtual BackendInfo info() const { return {}; }
+	// Controllers (hand: 0 = left, 1 = right). hand() is the state of the last beginFrame; a backend
+	// without controllers reports an inactive hand.
+	virtual HandState hand(int) const { return {}; }
+	// Mock only (default: ignored). mockSetHand replaces a hand's raw state; mockSetHeadOffset moves
+	// the head offset linearly to `target` over `seconds` of the beginFrame clock (0 = at once), starting
+	// at the `now` of the last beginFrame.
+	virtual void mockSetHand(int, const HandState&) {}
+	virtual void mockSetHeadOffset(glm::vec3 /*target*/, float /*seconds*/) {}
 };
 
 // Fake headset. `GlExt` may be null (tests): the mock then never touches GL and acquireEye returns 0.

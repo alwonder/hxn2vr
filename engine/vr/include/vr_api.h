@@ -62,6 +62,31 @@ int  VR_BeginFrame(vr_frame_t *out);
 void VR_GetHeadPose(vr_pose_t *out);
 void VR_GetEye(int eye, vr_pose_t *pose, vr_fov_t *fov);
 void VR_GetEyeSize(int *w, int *h);
+
+/* Controllers. Poses are in metres, tracking space (no vr_height_offset). */
+enum { VR_HAND_LEFT = 0, VR_HAND_RIGHT = 1 };
+#define VR_BTN_TRIGGER 0x01u   /* from trigger value: press >= 0.55, release <= 0.35 */
+#define VR_BTN_GRIP    0x02u   /* from squeeze value, same hysteresis */
+#define VR_BTN_LOWER   0x04u   /* A (right) / X (left) */
+#define VR_BTN_UPPER   0x08u   /* B / Y */
+#define VR_BTN_STICK   0x10u   /* thumbstick click */
+#define VR_BTN_MENU    0x20u
+typedef struct {
+	int active;            /* a controller is bound and its pose action is active */
+	int pose_valid;        /* grip and aim located this frame (orientation and position valid) */
+	vr_pose_t grip, aim;   /* metres, tracking space (no vr_height_offset) */
+	float trigger, squeeze;   /* 0..1 */
+	float stick[2];        /* x right, y up, -1..1, raw (no deadzone) */
+	unsigned buttons;      /* VR_BTN_* */
+} vr_hand_t;
+/* State of the last VR_BeginFrame; all zero when not running or when the hand is inactive. */
+void VR_GetHand(int hand, vr_hand_t *out);
+/* Mock backend only (ignored by OpenXR): replaces a hand's raw state (buttons: only LOWER/UPPER/STICK/MENU
+ * are taken; TRIGGER/GRIP come from trigger/squeeze) / moves the head offset linearly to `target` over
+ * `seconds` (0 = at once) of host time. The move starts at the host time of the last VR_BeginFrame. */
+void VR_MockSetHand(int hand, const vr_hand_t *in);
+void VR_MockSetHeadOffset(const vr_vec3_t *target, float seconds);
+
 /* Per frame, after VR_BeginFrame returned render != 0, for eye 0 then 1:
  * VR_BeginEye acquires the eye image, binds its framebuffer and sets the viewport; returns 1 if
  * the eye target is bound (draw into it), 0 if not (do not draw). VR_EndEye mirrors the eye into

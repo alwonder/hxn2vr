@@ -2,6 +2,7 @@
 #include "backend.hpp"
 #include "gl_ext.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <thread>
@@ -30,6 +31,10 @@ public:
 		params_ = p;
 		size_ = glm::ivec2(scaled(kBaseEyeW, p.renderScale), scaled(kBaseEyeH, p.renderScale));
 		paced_ = false;
+		resetHands();
+		offFrom_ = offTarget_ = glm::vec3(0.0f);
+		offStart_ = offDur_ = 0.0;
+		haveNow_ = offPendingStart_ = false;
 		updatePoses(0.0);
 		createTextures();
 		return true;
@@ -39,6 +44,12 @@ public:
 
 	FrameInfo beginFrame(double now) override {
 		pace();
+		lastNow_ = now;
+		haveNow_ = true;
+		if (offPendingStart_) {   // set before the first frame: the move starts with it
+			offStart_ = now;
+			offPendingStart_ = false;
+		}
 		updatePoses(now);
 		return FrameInfo{true, true, false};
 	}
@@ -54,6 +65,16 @@ public:
 	void endFrame() override {}
 	BackendInfo info() const override {
 		return BackendInfo{"mock", "focused", "", gl_ ? "GL_RGBA8 (0x8058)" : "none (no GL)"};
+	}
+
+	HandState hand(int i) const override { return hands_[i == 0 ? 0 : 1]; }
+	void mockSetHand(int i, const HandState& s) override { hands_[i == 0 ? 0 : 1] = s; }
+	void mockSetHeadOffset(glm::vec3 target, float seconds) override {
+		offFrom_ = headOffset(lastNow_);   // continue from where the head is now
+		offTarget_ = target;
+		offDur_ = seconds > 0.0f ? static_cast<double>(seconds) : 0.0;
+		offStart_ = lastNow_;
+		offPendingStart_ = !haveNow_;
 	}
 
 private:
@@ -84,8 +105,24 @@ private:
 		tex_[0] = tex_[1] = 0;
 	}
 
+	// Default controllers: held in front of the chest, identity orientation.
+	void resetHands() {
+		for (int i = 0; i < 2; ++i) {
+			HandState h;
+			h.active = h.poseValid = true;
+			h.grip.pos = h.aim.pos = glm::vec3(i == 0 ? -0.2f : 0.2f, 1.0f, -0.3f);
+			hands_[i] = h;
+		}
+	}
+
+	glm::vec3 headOffset(double t) const {
+		if (!(offDur_ > 0.0)) return offTarget_;
+		const double k = std::clamp((t - offStart_) / offDur_, 0.0, 1.0);
+		return offFrom_ + (offTarget_ - offFrom_) * static_cast<float>(k);
+	}
+
 	void updatePoses(double t) {
-		head_.pos = glm::vec3(0.0f, params_.eyeHeightM, 0.0f);
+		head_.pos = glm::vec3(0.0f, params_.eyeHeightM, 0.0f) + headOffset(t);
 		head_.rot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 		if (params_.mockMotion) {
 			const double yaw = kSwayDeg * std::sin(2.0 * kPi * t / kSwayPeriodS);
@@ -117,6 +154,11 @@ private:
 	Pose head_{glm::vec3(0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f)};
 	Pose eyes_[2] = {head_, head_};
 	bool paced_ = false;
+	HandState hands_[2];
+	// Head offset animation (mockSetHeadOffset), on the beginFrame clock.
+	glm::vec3 offFrom_{0.0f}, offTarget_{0.0f};
+	double offStart_ = 0.0, offDur_ = 0.0, lastNow_ = 0.0;
+	bool haveNow_ = false, offPendingStart_ = false;
 	std::chrono::steady_clock::time_point next_{};
 };
 
