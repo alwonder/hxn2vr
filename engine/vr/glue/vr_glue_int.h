@@ -89,6 +89,8 @@ void VRG_CrouchStart (void);		/* VRG_Start: no crouch state, no fade */
  * (moved down in place, *shift_z = the move, for both eyes) and the fade goes to 1 (6/s) while the line from
  * the body's eye (feet + min(cl.viewheight, head height)) to cam crosses a wall, else to 0. Returns the fade. */
 float VRG_HeadCollide (qboolean world, const vec3_t feet, vec3_t cam, float *shift_z);
+/* Shared point-hull trace for remote-client world geometry. Requires cl.worldmodel. */
+void VRG_WorldTrace (const vec3_t start, const vec3_t end, trace_t *tr);
 
 /* ---- from vr_glue.c, for vr_glue_body.c ---- */
 

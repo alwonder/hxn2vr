@@ -23,4 +23,9 @@ void drawFade(const GlExt &gl, float alpha);
 // drawn for inner >= 1.45 (nothing to see) or a non-finite argument.
 void drawVignette(const GlExt &gl, float cx, float cy, float inner);
 
+// World primitives use the current eye matrices and restore their GL attributes.
+void drawMarker(const GlExt &gl, const float org[3], float size, const float rgba[4]);
+void drawAimDot(const GlExt &gl, const float org[3], const float right[3], const float up[3],
+                float size, const float rgba[4]);
+
 }  // namespace hxvr

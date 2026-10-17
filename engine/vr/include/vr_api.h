@@ -200,6 +200,14 @@ void  VR_VignetteCenter(const vr_fov_t *fov, float out[2]);
  * after the world, before VR_DrawFade and the panel. */
 void  VR_DrawVignette(int eye, float inner);
 
+/* World primitives in the current eye matrices; touched GL state restored. Bound eye only. */
+/* Small octahedron, half-size in world units, depth-tested. */
+void VR_DrawMarker(const float org[3], float size, const float rgba[4]);
+/* Camera-facing square; unit eye right/up axes, half-size in world units, depth test off. */
+void VR_DrawAimDot(const float org[3], const float right[3], const float up[3], float size, const float rgba[4]);
+/* 0.5 + distance * 0.004, clamped [0.5, 6]; NaN -> 0.5. */
+float VR_AimDotSize(float distance_units);
+
 /* Room-scale on the client (pure functions). The head leans away from the body's centre (the feet) in world
  * axes, so turning the body does not move the head; past the radius the body should walk the excess. */
 typedef struct { float lean[2]; vr_vec3_t last_head; int has_last; } vr_room_t;   /* lean: Quake units, world x/y */

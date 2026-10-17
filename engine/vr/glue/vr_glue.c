@@ -603,8 +603,8 @@ static qboolean VRG_RenderPanel (void)
 	return true;
 }
 
-/* Draws the panel quad into the bound eye with the eye's projection and view matrices. */
-static void VRG_DrawPanel (const float corners[4][3], const vec3_t org, const vec3_t ang)
+/* R_PolyBlend changes the matrices: restore the eye's world matrices for world overlays. */
+static void VRG_BeginWorldOverlay (const vec3_t org, const vec3_t ang)
 {
 	float	proj[16], view[16];
 	float	znear = vr_nearclip.value;
@@ -621,11 +621,22 @@ static void VRG_DrawPanel (const float corners[4][3], const vec3_t org, const ve
 	glMatrixMode_fp (GL_MODELVIEW);
 	glPushMatrix_fp ();
 	glLoadMatrixf_fp (view);
-	VR_DrawPanelQuad (corners);
+}
+
+static void VRG_EndWorldOverlay (void)
+{
 	glPopMatrix_fp ();
 	glMatrixMode_fp (GL_PROJECTION);
 	glPopMatrix_fp ();
 	glMatrixMode_fp (GL_MODELVIEW);
+}
+
+/* Draws the panel quad into the bound eye with the eye's projection and view matrices. */
+static void VRG_DrawPanel (const float corners[4][3], const vec3_t org, const vec3_t ang)
+{
+	VRG_BeginWorldOverlay (org, ang);
+	VR_DrawPanelQuad (corners);
+	VRG_EndWorldOverlay ();
 }
 
 qboolean VRG_UpdateScreen (void)
@@ -634,7 +645,7 @@ qboolean VRG_UpdateScreen (void)
 	qboolean	world, panel;
 	vec3_t		feet, save_org, save_ang, head_ang, eye_org, eye_ang, head_org, head_view;
 	float		body_yaw, upm, hscale, fade, shift_z, vignette, amount;
-	float		corners[4][3];
+	float		corners[4][3], eye_forward[3], eye_right[3], eye_up[3];
 	vr_pose_t	head, eyes[2];
 
 	if (vrg_in_update)
@@ -678,6 +689,7 @@ qboolean VRG_UpdateScreen (void)
 	VR_ComposeViewAngles (body_yaw, head_ang, head_view);
 	VRG_PanelPlace (world, feet, body_yaw, upm, head_org, head_view, corners);
 	panel = VRG_RenderPanel ();
+	VRG_WeaponIndicatorsFrame (world);	/* trace once, after room lean, before either eye */
 
 	VR_GetEyeSize (&vrg_eye_w, &vrg_eye_h);
 	for (eye = 0; eye < 2; eye++)
@@ -703,7 +715,14 @@ qboolean VRG_UpdateScreen (void)
 			{
 				VRG_ClearColor (0.05f, 0.05f, 0.05f, GL_DEPTH_BUFFER_BIT);
 			}
-			/* world, vignette, fade, panel: the menus stay visible in the dark */
+			/* world (including weapon), marker, dot, vignette, fade, panel */
+			if (world)
+			{
+				AngleVectors (eye_ang, eye_forward, eye_right, eye_up);
+				VRG_BeginWorldOverlay (eye_org, eye_ang);
+				VRG_DrawWeaponIndicators (eye_right, eye_up);
+				VRG_EndWorldOverlay ();
+			}
 			if (vignette < 1.45f)
 				VR_DrawVignette (eye, vignette);
 			VR_DrawFade (fade);

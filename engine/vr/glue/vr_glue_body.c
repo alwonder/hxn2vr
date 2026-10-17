@@ -311,7 +311,7 @@ static float		vrg_fade;		/* 0..1, black over the eyes while the head is in a wal
 static double		vrg_fade_time;		/* host time of the previous VRG_HeadCollide (0: none) */
 
 /* A line through the world's point hull (hull 0), initialized like SV_ClipMoveToEntity */
-static void VRG_WorldTrace (const vec3_t start, const vec3_t end, trace_t *tr)
+void VRG_WorldTrace (const vec3_t start, const vec3_t end, trace_t *tr)
 {
 	hull_t	*hull = &cl.worldmodel->hulls[0];
 	vec3_t	p1, p2;

@@ -12,6 +12,11 @@
 cvar_t vr_compat = {"vr_compat", "1", CVAR_ARCHIVE};
 cvar_t vr_gunangle = {"vr_gunangle", "0", CVAR_ARCHIVE};
 cvar_t vr_viewmodel = {"vr_viewmodel", "1", CVAR_ARCHIVE};
+static cvar_t vr_aimdot = {"vr_aimdot", "1", CVAR_ARCHIVE};
+static cvar_t vr_offhand_marker = {"vr_offhand_marker", "1", CVAR_ARCHIVE};
+static qboolean vrg_marker_valid, vrg_dot_valid;
+static vec3_t vrg_marker_org, vrg_dot_org;
+static float vrg_dot_size;
 static float vrg_viewmodel_scale = 1;
 static qboolean vrg_tuning, vrg_grabbed, vrg_grip_down;
 static int vrg_tune_hand;
@@ -118,6 +123,8 @@ void VRG_WeaponInit (void)
 	Cvar_RegisterVariable (&vr_compat);
 	Cvar_RegisterVariable (&vr_gunangle);
 	Cvar_RegisterVariable (&vr_viewmodel);
+	Cvar_RegisterVariable (&vr_aimdot);
+	Cvar_RegisterVariable (&vr_offhand_marker);
 	Cmd_AddCommand ("vr_weapon_offset", VRG_WeaponOffset_f);
 	Cmd_AddCommand ("vr_weapon_list", VRG_WeaponList_f);
 	Cmd_AddCommand ("vr_weapon_tune", VRG_WeaponTune_f);
@@ -130,13 +137,20 @@ static qmodel_t *VRG_WeaponModel (void)
 	return (index > 0 && index < MAX_MODELS) ? cl.model_precache[index] : NULL;
 }
 
+/* The same tracking-to-world path for weapon aim, tuning grip and off-hand marker. */
+static void VRG_HandOrigin (const vr_pose_t *head, const vr_pose_t *pose, float org[3])
+{
+	VR_EyeOrigin (cl_entities[cl.viewentity].origin, vrg_body_yaw, vrg_room.lean,
+		&head->pos, &pose->pos, VR_UnitsPerMetre (vrg_eye_height, vrg_world_scale),
+		VRG_HeightScale (), org);
+}
+
 static void VRG_HandWeaponPose (float muzzle_world[3], float aim_angles[3], qboolean *valid)
 {
 	vr_pose_t head;
 	vr_hand_t hands[2];
 	const vr_hand_t *hand;
-	float angles[3], upm;
-	vec3_t feet;
+	float angles[3];
 
 	*valid = false;
 	VectorClear (muzzle_world);
@@ -147,10 +161,7 @@ static void VRG_HandWeaponPose (float muzzle_world[3], float aim_angles[3], qboo
 	hand = &hands[VRG_MainHand ()];
 	if (!hand->active || !hand->pose_valid)
 		return;
-	VectorCopy (cl_entities[cl.viewentity].origin, feet);
-	upm = VR_UnitsPerMetre (vrg_eye_height, vrg_world_scale);
-	VR_EyeOrigin (feet, vrg_body_yaw, vrg_room.lean, &head.pos, &hand->aim.pos,
-			upm, VRG_HeightScale (), muzzle_world);
+	VRG_HandOrigin (&head, &hand->aim, muzzle_world);
 	VR_TrackingToQuakeAngles (&hand->aim.rot, angles);
 	VR_ComposeViewAngles (vrg_body_yaw, angles, aim_angles);
 	aim_angles[PITCH] += vr_gunangle.value;
@@ -195,9 +206,7 @@ void VRG_WeaponTuneFrame (float dt)
 	if (!valid || !other->active || !other->pose_valid || Key_GetDest () != key_game)
 	{ vrg_grabbed = false; vrg_grip_down = true; return; }
 	down = (other->buttons & VR_BTN_GRIP) != 0;
-	VR_EyeOrigin (cl_entities[cl.viewentity].origin, vrg_body_yaw, vrg_room.lean,
-		&head.pos, &other->grip.pos, VR_UnitsPerMetre (vrg_eye_height, vrg_world_scale),
-		VRG_HeightScale (), other_org);
+	VRG_HandOrigin (&head, &other->grip, other_org);
 	VR_TrackingToQuakeAngles (&other->grip.rot, angles);
 	VR_ComposeViewAngles (vrg_body_yaw, angles, other_ang);
 	if (!vrg_grabbed) VR_WeaponGet (model->name, model->mins, model->maxs, &vrg_tune_entry);
@@ -267,6 +276,59 @@ qboolean VRG_ViewModelPose (entity_t *e)
 float VRG_ViewModelScale (void)
 {
 	return vrg_viewmodel_scale;
+}
+
+/* Once per rendered frame before either eye: both eyes share one trace result. */
+void VRG_WeaponIndicatorsFrame (qboolean world)
+{
+	vr_pose_t head;
+	vr_hand_t hands[2], *other;
+	qboolean valid;
+	vec3_t muzzle, angles, forward, right, up, end, delta;
+	trace_t tr;
+	edict_t *player;
+
+	vrg_marker_valid = vrg_dot_valid = false;
+	if (!VR_IsRunning () || !world || Key_GetDest () != key_game ||
+		cl.intermission || cls.signon != SIGNONS)
+		return;
+	if (vr_offhand_marker.integer)
+	{
+		VRG_TrackedPoses (&head, NULL, hands);
+		other = &hands[1 - VRG_MainHand ()];
+		if (other->active && other->pose_valid)
+		{
+			VRG_HandOrigin (&head, &other->grip, vrg_marker_org);
+			vrg_marker_valid = true;
+		}
+	}
+	if (!vr_aimdot.integer || !VRG_WeaponModel () || cl.v.health <= 0 || cl.v.cameramode)
+		return;
+	VRG_WeaponPose (muzzle, angles, &valid);
+	if (!valid) return;
+	AngleVectors (angles, forward, right, up);
+	VectorMA (muzzle, 4096.0f, forward, end);
+	if (sv.active)
+	{
+		player = (cl.viewentity > 0 && cl.viewentity < sv.num_edicts) ?
+			EDICT_NUM(cl.viewentity) : svs.clients[0].edict;
+		tr = SV_Move (muzzle, vec3_origin, vec3_origin, end, MOVE_NORMAL, player);
+	}
+	else
+		VRG_WorldTrace (muzzle, end, &tr);
+	VectorSubtract (tr.endpos, muzzle, delta);
+	vrg_dot_size = VR_AimDotSize ((float)VectorLength (delta));
+	VectorMA (tr.endpos, -1.0f, forward, vrg_dot_org);
+	vrg_dot_valid = true;
+}
+
+void VRG_DrawWeaponIndicators (const float right[3], const float up[3])
+{
+	static const float marker_color[4] = {0.8f, 0.8f, 1.0f, 0.8f};
+	static const float dot_color[4] = {1.0f, 0.3f, 0.2f, 0.9f};
+
+	if (vrg_marker_valid) VR_DrawMarker (vrg_marker_org, 1.5f, marker_color);
+	if (vrg_dot_valid) VR_DrawAimDot (vrg_dot_org, right, up, vrg_dot_size, dot_color);
 }
 
 void VRG_AimAngles (float angles[3])

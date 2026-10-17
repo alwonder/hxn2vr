@@ -345,6 +345,14 @@ void VR_DrawFade(float alpha) {
 	if (!g_backend || !g_glLoaded || !(g_eyeBound[0] || g_eyeBound[1])) return;
 	hxvr::drawFade(g_gl, alpha);
 }
+void VR_DrawMarker(const float org[3], float size, const float rgba[4]) {
+	if (!g_backend || !g_glLoaded || !(g_eyeBound[0] || g_eyeBound[1])) return;
+	hxvr::drawMarker(g_gl, org, size, rgba);
+}
+void VR_DrawAimDot(const float org[3], const float right[3], const float up[3], float size, const float rgba[4]) {
+	if (!g_backend || !g_glLoaded || !(g_eyeBound[0] || g_eyeBound[1])) return;
+	hxvr::drawAimDot(g_gl, org, right, up, size, rgba);
+}
 void VR_DrawVignette(int eye, float inner) {
 	if (!g_backend || !g_glLoaded || eye < 0 || eye > 1 || !g_eyeBound[eye]) return;
 	const hxvr::Fov f = g_backend->eyeFov(eye);

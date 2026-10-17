@@ -110,9 +110,65 @@ void drawVignette(const GlExt &gl, float cx, float cy, float inner) {
 	endClipSpace(gl);
 }
 
+namespace {
+bool finiteVector(const float *v, int n) {
+	if (!v) return false;
+	for (int i = 0; i < n; ++i) if (!std::isfinite(v[i])) return false;
+	return true;
+}
+
+void beginWorldPrimitive(const GlExt &gl, const float rgba[4], bool depth) {
+	gl.glPushAttrib(gl::kEnableBit | gl::kColorBufferBit | gl::kDepthBufferBit | gl::kCurrentBit);
+	setOverlayState(gl);
+	if (depth) gl.glEnable(gl::kDepthTest);
+	gl.glDisable(gl::kTexture2D);
+	gl.glColor4f(rgba[0], rgba[1], rgba[2], rgba[3]);
+}
+}  // namespace
+
+void drawMarker(const GlExt &gl, const float org[3], float size, const float rgba[4]) {
+	if (!finiteVector(org, 3) || !finiteVector(rgba, 4) || !std::isfinite(size) || size <= 0) return;
+	beginWorldPrimitive(gl, rgba, true);
+	// Four equatorial edges, each joined to the top and bottom of the octahedron.
+	static const float ring[4][2] = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
+	gl.glBegin(0x0004);   // GL_TRIANGLES
+	for (int i = 0; i < 4; ++i) {
+		const int j = (i + 1) % 4;
+		for (int pole = -1; pole <= 1; pole += 2) {
+			gl.glVertex3f(org[0], org[1], org[2] + pole * size);
+			gl.glVertex3f(org[0] + ring[i][0] * size, org[1] + ring[i][1] * size, org[2]);
+			gl.glVertex3f(org[0] + ring[j][0] * size, org[1] + ring[j][1] * size, org[2]);
+		}
+	}
+	gl.glEnd();
+	gl.glPopAttrib();
+}
+
+void drawAimDot(const GlExt &gl, const float org[3], const float right[3], const float up[3],
+                float size, const float rgba[4]) {
+	if (!finiteVector(org, 3) || !finiteVector(right, 3) || !finiteVector(up, 3) ||
+	    !finiteVector(rgba, 4) || !std::isfinite(size) || size <= 0) return;
+	beginWorldPrimitive(gl, rgba, false);
+	static const float corners[4][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
+	gl.glBegin(gl::kQuads);
+	for (const auto &c : corners) {
+		float v[3];
+		for (int i = 0; i < 3; ++i) v[i] = org[i] + size * (c[0] * right[i] + c[1] * up[i]);
+		gl.glVertex3f(v[0], v[1], v[2]);
+	}
+	gl.glEnd();
+	gl.glPopAttrib();
+}
+
 }  // namespace hxvr
 
 extern "C" {
+
+float VR_AimDotSize(float distance_units) {
+	if (!(distance_units > 0.0f)) return 0.5f;
+	const float size = 0.5f + distance_units * 0.004f;
+	return size > 6.0f ? 6.0f : size;
+}
 
 float VR_CameraHeightScale(float viewheight, int physical_crouch) {
 	if (physical_crouch || !std::isfinite(viewheight)) return 1.0f;

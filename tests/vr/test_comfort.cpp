@@ -98,6 +98,10 @@ void HXVR_GLAPI f_vertex2f(float x, float y) {
 	++g_fake->vertices;
 	g_fake->verts.push_back({x, y, g_fake->color[3], g_fake->shade == gl::kSmooth});
 }
+void HXVR_GLAPI f_vertex3f(float, float, float) {
+	CHECK(g_fake->inBegin);
+	if (g_fake->inBegin) ++g_fake->vertices;
+}
 
 GlExt fake_ext() {
 	GlExt e;
@@ -116,10 +120,54 @@ GlExt fake_ext() {
 	e.glBegin = f_begin;
 	e.glEnd = f_end;
 	e.glVertex2f = f_vertex2f;
+	e.glVertex3f = f_vertex3f;
 	return e;
 }
 
 }  // namespace
+
+TEST_CASE("aim dot size grows with distance") {
+	CHECK(VR_AimDotSize(0.0f) == doctest::Approx(0.5f));
+	CHECK(VR_AimDotSize(100.0f) == doctest::Approx(0.9f));
+	CHECK(VR_AimDotSize(2000.0f) == doctest::Approx(6.0f));
+	CHECK(VR_AimDotSize(std::numeric_limits<float>::quiet_NaN()) == doctest::Approx(0.5f));
+}
+
+TEST_CASE("marker and aim dot draw balanced GL state") {
+	FakeGl fake;
+	g_fake = &fake;
+	const GlExt e = fake_ext();
+	const float org[3] = {10.0f, 20.0f, 30.0f};
+	const float right[3] = {1.0f, 0.0f, 0.0f};
+	const float up[3] = {0.0f, 0.0f, 1.0f};
+	const float markerColor[4] = {0.8f, 0.8f, 1.0f, 0.8f};
+	const float dotColor[4] = {1.0f, 0.3f, 0.2f, 0.9f};
+
+	// Check each draw independently, with either incoming matrix mode.
+	for (const auto mode : {kModelview, kProjection}) {
+		for (int draw = 0; draw < 2; ++draw) {
+			fake = FakeGl{};
+			fake.mode = mode;
+			if (draw == 0) drawMarker(e, org, 1.5f, markerColor);
+			else drawAimDot(e, org, right, up, 0.9f, dotColor);
+			CHECK(fake.vertices > 0);
+			CHECK(fake.begins > 0);
+			CHECK_FALSE(fake.inBegin);
+			CHECK(fake.maxAttribDepth > 0);
+			CHECK(fake.attribDepth == 0);
+			CHECK(fake.modeTop == 0);
+			CHECK(fake.matrixDepth[0] == 0);
+			CHECK(fake.matrixDepth[1] == 0);
+			CHECK(fake.mode == mode);
+			// World primitives must use the eye's existing matrices.
+			for (const auto &call : fake.calls) {
+				CHECK(call != "identity proj");
+				CHECK(call != "identity mv");
+			}
+		}
+	}
+	g_fake = nullptr;
+}
 
 TEST_CASE("fade quad restores the GL state") {
 	FakeGl fake;
