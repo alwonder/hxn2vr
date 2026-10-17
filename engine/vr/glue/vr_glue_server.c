@@ -39,9 +39,10 @@ void VRG_ServerFireEnd (edict_t *player, const float muzzle[3], const float body
 		if ((i >= vrg_fire_count || vrg_fire_free[i]) && !e->free &&
 		    e->v.owner == EDICT_TO_PROG(player))
 		{
-			q_snprintf (vrg_last_fire, sizeof(vrg_last_fire), "VR: fire muzzle %.3f %.3f %.3f body %.3f %.3f %.3f\n",
-				muzzle[0], muzzle[1], muzzle[2], body[0], body[1], body[2]);
-			Con_SafePrintf ("%s", vrg_last_fire);
+			q_snprintf (vrg_last_fire, sizeof(vrg_last_fire), "fire muzzle %.3f %.3f %.3f body %.3f %.3f %.3f proj %.3f %.3f %.3f\n",
+				muzzle[0], muzzle[1], muzzle[2], body[0], body[1], body[2],
+				e->v.origin[0], e->v.origin[1], e->v.origin[2]);
+			Con_SafePrintf ("VR: %s", vrg_last_fire);
 			break;
 		}
 	}
@@ -51,7 +52,7 @@ void VRG_ServerFireEnd (edict_t *player, const float muzzle[3], const float body
 void VRG_FireInfo_f (void)
 {
 	if (vrg_last_fire[0])
-		Con_SafePrintf ("%s", vrg_last_fire);
+		Con_SafePrintf ("VR: last %s", vrg_last_fire);
 	else
 		Con_SafePrintf ("VR: no wrapped fire recorded\n");
 }

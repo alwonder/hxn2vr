@@ -239,8 +239,11 @@ int VR_RoomscaleMoveOk(const float move[2]);
 
 /* Stock-progs compatibility: origin + proj_ofs must equal the muzzle. */
 void VR_CompatOrigin(const float muzzle[3], const float proj_ofs[3], float out[3]);
-/* Trace fraction < 1 pulls the muzzle back two units along the trace, never past start. */
-void VR_CompatClampMuzzle(const float start[3], const float muzzle[3], float fraction, float out[3]);
+/* No obstruction: muzzle unchanged. Otherwise hit is the first wall on the body/muzzle/aim probe;
+ * place the muzzle clearance units before hit along start->hit, never behind start.
+ * The caller traces start->muzzle, muzzle->muzzle+aim*clearance, and validates start->hit. */
+void VR_CompatClampMuzzle(const float start[3], const float muzzle[3], const float hit[3],
+                          int blocked, float clearance, float out[3]);
 /* Restore real + (after - swapped), preserving movement made by progs. */
 void VR_CompatRestore(const float real[3], const float swapped[3], const float after[3], float out[3]);
 /* Fresh age in [0, 0.1], alive, WALK/FLY/NOCLIP/SWIM, outside intermission/camera. */

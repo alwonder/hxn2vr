@@ -15,19 +15,48 @@ TEST_CASE("compat muzzle is clamped by the body trace") {
 	const float start[3] = {0, 0, 50};
 	const float muzzle[3] = {40, 0, 50};
 	float out[3];
-	VR_CompatClampMuzzle(start, muzzle, 0.5f, out);
-	CHECK(out[0] == doctest::Approx(18));
+	const float body_hit[3] = {20, 0, 50};
+	VR_CompatClampMuzzle(start, muzzle, body_hit, 1, 16, out);
+	CHECK(out[0] == doctest::Approx(4));
 	CHECK(out[1] == doctest::Approx(0));
 	CHECK(out[2] == doctest::Approx(50));
 
-	VR_CompatClampMuzzle(start, muzzle, 1.0f, out);
+	// No wall on either probe, including the 16 units ahead along aim.
+	VR_CompatClampMuzzle(start, muzzle, muzzle, 0, 16, out);
 	CHECK(out[0] == doctest::Approx(40));
 	CHECK(out[1] == doctest::Approx(0));
 	CHECK(out[2] == doctest::Approx(50));
 
-	VR_CompatClampMuzzle(start, muzzle, 0.01f, out);
+	// Wall at the muzzle: leave the full stock-progs spawn clearance.
+	VR_CompatClampMuzzle(start, muzzle, muzzle, 1, 16, out);
+	CHECK(out[0] == doctest::Approx(24));
+	CHECK(out[1] == doctest::Approx(0));
+	CHECK(out[2] == doctest::Approx(50));
+
+	// Wall 8 units ahead of the muzzle: pull back another 8, giving 16 to the hit.
+	const float ahead_hit[3] = {48, 0, 50};
+	VR_CompatClampMuzzle(start, muzzle, ahead_hit, 1, 16, out);
+	CHECK(out[0] == doctest::Approx(32));
+	CHECK(out[1] == doctest::Approx(0));
+	CHECK(out[2] == doctest::Approx(50));
+
+	const float close_hit[3] = {0.4f, 0, 50};
+	VR_CompatClampMuzzle(start, muzzle, close_hit, 1, 16, out);
 	CHECK(out[0] == doctest::Approx(0));
 	CHECK(out[1] == doctest::Approx(0));
+	CHECK(out[2] == doctest::Approx(50));
+
+	VR_CompatClampMuzzle(start, muzzle, start, 1, 16, out);
+	CHECK(out[0] == doctest::Approx(0));
+	CHECK(out[1] == doctest::Approx(0));
+	CHECK(out[2] == doctest::Approx(50));
+
+	// Eye-to-hand and aim need not line up. Clearance follows the validated eye->hit path.
+	const float corner_muzzle[3] = {24, 24, 50};
+	const float corner_hit[3] = {24, 32, 50};
+	VR_CompatClampMuzzle(start, corner_muzzle, corner_hit, 1, 16, out);
+	CHECK(out[0] == doctest::Approx(14.4f));
+	CHECK(out[1] == doctest::Approx(19.2f));
 	CHECK(out[2] == doctest::Approx(50));
 }
 

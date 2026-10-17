@@ -45,7 +45,8 @@
        default `vr_vignette 1`: the comfort vignette is on screen and the shot must still pass check_shot --stereo.
        (The final screenshot of the run-smoke wrapper is hexen01 and is not checked.)
     w  all four classes, one process -> tracked projectile muzzle > 8 units right of the body,
-       vr_fireinfo repeats the last fire line; pose invalid -> no wrapped fire, but server mana decreases.
+       projectile origin within 40 units of the muzzle; vr_fireinfo uses the distinct "VR: last fire"
+       prefix; pose invalid -> no wrapped fire, but server mana decreases.
        Short per-class cfgs finish before delayed controller presses; server edict dumps verify the class
        and mana. Each class gets three 150-frame settling waits and a 28-second event sequence.
     h  map demo1, mock controller only -> room-scale walking on the server (clc_hxvr): `vr_where` (A), the mock
@@ -322,7 +323,7 @@ function Test-VrLog([string]$path, $sc) {
     if ($sc.Weapon) {
         $text = $lines -join "`n"
         $num = '(-?\d+(?:\.\d+)?)'
-        $fireRe = "^VR: fire muzzle $num $num $num body $num $num $num$"
+        $fireRe = "^VR: fire muzzle $num $num $num body $num $num $num proj $num $num $num$"
         foreach ($class in 1..4) {
             $tracked = [regex]::Matches($text, "(?ms)^HXW_${class}_tracked_begin[^\S\n]*\n(.*?)^HXW_${class}_tracked_end[^\S\n]*$")
             if ($tracked.Count -ne 1) { return "class ${class}: missing/duplicate tracked window" }
@@ -338,10 +339,17 @@ function Test-VrLog([string]$path, $sc) {
                 $dy = [double]::Parse($Matches[2], [Globalization.CultureInfo]::InvariantCulture) - [double]::Parse($Matches[5], [Globalization.CultureInfo]::InvariantCulture)
                 $right = $dx * [Math]::Sin($yaw) - $dy * [Math]::Cos($yaw)
                 if ($right -le 8) { return "class ${class}: muzzle is only $right units to the right (expected > 8): $fire" }
+                $distance2 = 0.0
+                foreach ($axis in 1..3) {
+                    $delta = [double]::Parse($Matches[$axis + 6], [Globalization.CultureInfo]::InvariantCulture) - [double]::Parse($Matches[$axis], [Globalization.CultureInfo]::InvariantCulture)
+                    $distance2 += $delta * $delta
+                }
+                if ($distance2 -gt 1600) { return "class ${class}: projectile is more than 40 units from the muzzle: $fire" }
             }
-            # vr_fireinfo must replay the last line, outside the firing window.
+            # The distinct prefix proves this is vr_fireinfo, not a late real fire line.
             $info = [regex]::Match($text, "(?m)^HXW_${class}_tracked_end[^\S\n]*\n([^\r\n]+)")
-            if (-not $info.Success -or $info.Groups[1].Value -cne $fires[-1]) { return "class ${class}: vr_fireinfo did not replay the last wrapped fire" }
+            $expectedInfo = $fires[-1] -creplace '^VR: fire ', 'VR: last fire '
+            if (-not $info.Success -or $info.Groups[1].Value -cne $expectedInfo) { return "class ${class}: vr_fireinfo did not replay the last wrapped fire" }
             $untracked = [regex]::Matches($text, "(?ms)^HXW_${class}_untracked_begin[^\S\n]*\n(.*?)^HXW_${class}_untracked_end[^\S\n]*$")
             if ($untracked.Count -ne 1) { return "class ${class}: missing/duplicate untracked window" }
             $section = $untracked[0].Groups[1].Value
@@ -366,7 +374,7 @@ function Test-VrLog([string]$path, $sc) {
     # Expected VR: lines are the start/stop/recenter/default-bindings notices (and vr_where output); anything else is an error report.
     $bad = @($vrLines | Where-Object { $_ -cne 'VR: started (mock)' -and $_ -cne 'VR: stopped' -and $_ -cne 'VR: recentered' -and
         $_ -cne 'VR: default controller bindings set' -and $_ -cnotmatch '^VR: where ' -and
-        $_ -cnotmatch '^VR: calibration done: ' -and -not ($sc.Weapon -and $_ -cmatch '^VR: fire muzzle -?\d+\.\d{3} -?\d+\.\d{3} -?\d+\.\d{3} body -?\d+\.\d{3} -?\d+\.\d{3} -?\d+\.\d{3}$') })
+        $_ -cnotmatch '^VR: calibration done: ' -and -not ($sc.Weapon -and $_ -cmatch '^VR: (?:last )?fire muzzle -?\d+\.\d{3} -?\d+\.\d{3} -?\d+\.\d{3} body -?\d+\.\d{3} -?\d+\.\d{3} -?\d+\.\d{3} proj -?\d+\.\d{3} -?\d+\.\d{3} -?\d+\.\d{3}$') })
     if ($bad.Count) { return "log has VR error line(s): $($bad -join ' | ')" }
     return $null
 }
