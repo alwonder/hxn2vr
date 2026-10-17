@@ -8,6 +8,7 @@
 #include "vr_api.h"
 #include "vr_glue.h"
 #include "vr_glue_int.h"
+#include "vr_glue_weapon.h"
 
 cvar_t	vr_mainhand = {"vr_mainhand", "1", CVAR_ARCHIVE};	/* 0 left, 1 right (= VR_HAND_*) */
 cvar_t	vr_movement_mode = {"vr_movement_mode", "1", CVAR_ARCHIVE};	/* 0 head, 1 aim of the off hand */
@@ -67,7 +68,7 @@ static unsigned		vrg_in_serial;
 
 qboolean		vrg_input_modal;	/* vr_glue_int.h: VRG_ModalFrame is running a frame */
 
-static int VRG_MainHand (void)
+int VRG_MainHand (void)
 {
 	return (vr_mainhand.integer == VR_HAND_LEFT) ? VR_HAND_LEFT : VR_HAND_RIGHT;
 }
@@ -283,7 +284,7 @@ void VRG_StickMove (usercmd_t *cmd)
 {
 	vr_hand_t	hands[2], h;
 	vr_pose_t	head_pose;
-	float		head[3], stick[2], move[2], move_yaw, view_yaw;
+	float		head[3], stick[2], move[2], move_yaw, view[3];
 
 	if (!VRG_StickGameplay ())
 		return;
@@ -297,11 +298,9 @@ void VRG_StickMove (usercmd_t *cmd)
 	VR_TrackingToQuakeAngles (&head_pose.rot, head);
 	/* a hand without a valid pose keeps stale poses: VR_MoveYaw falls back to the head */
 	move_yaw = VR_MoveYaw (vr_movement_mode.integer, &h.aim.rot, h.pose_valid, head[YAW], vrg_body_yaw);
-	/* The server now moves in the main hand's aim frame; retain the off hand/head movement direction. */
-	view_yaw = VR_MoveYaw (1, &hands[VRG_MainHand ()].aim.rot,
-			hands[VRG_MainHand ()].active && hands[VRG_MainHand ()].pose_valid,
-			head[YAW], vrg_body_yaw);
-	VR_StickToMove (stick, move_yaw, view_yaw, 200.0f, move);
+	/* Use the sent aim yaw even when the weapon points at the floor or ceiling. */
+	VRG_AimAngles (view);
+	VR_StickToMove (stick, move_yaw, view[YAW], 200.0f, move);
 	cmd->forwardmove += move[0];
 	cmd->sidemove += move[1];
 }

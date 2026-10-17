@@ -21,6 +21,7 @@ extern qboolean		vrg_body_valid;		/* body_yaw taken from cl.viewangles since VR 
 extern float		vrg_eye_height, vrg_world_scale;
 
 /* ---- controller input and mock dev commands (vr_glue_input.c) ---- */
+int VRG_MainHand (void); /* normalized VR_HAND_* selection */
 
 void VRG_InputInit (void);	/* VRG_Init: registers vr_mainhand, vr_bind_defaults, vr_mock_hand, vr_mock_head */
 void VRG_InputStart (void);	/* VRG_Start, after VR_Start succeeded: forgets all button state, resets the

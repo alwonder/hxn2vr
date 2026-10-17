@@ -438,18 +438,12 @@ void VRG_PreInput (void)
 /* After IN_Move: save the turned body yaw, then send weapon aim (head aim if untracked). */
 void VRG_PostInput (void)
 {
-	float	head[3], view[3], muzzle[3];
-	qboolean valid;
+	float	view[3];
 
 	if (!VR_IsRunning() || cls.demoplayback)
 		return;
 	vrg_body_yaw = cl.viewangles[YAW];
-	VRG_WeaponPose (muzzle, view, &valid);
-	if (!valid)
-	{
-		VRG_HeadAngles (head);
-		VR_ComposeViewAngles (vrg_body_yaw, head, view);
-	}
+	VRG_AimAngles (view);
 	VectorCopy (view, cl.viewangles);
 }
 

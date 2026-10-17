@@ -28,7 +28,7 @@ void VRG_WeaponPose (float muzzle_world[3], float aim_angles[3], qboolean *valid
 	if (!VR_IsRunning ())
 		return;
 	VRG_TrackedPoses (&head, NULL, hands);
-	hand = &hands[vr_mainhand.integer == VR_HAND_LEFT ? VR_HAND_LEFT : VR_HAND_RIGHT];
+	hand = &hands[VRG_MainHand ()];
 	if (!hand->active || !hand->pose_valid)
 		return;
 	VectorCopy (cl_entities[cl.viewentity].origin, feet);
@@ -39,4 +39,19 @@ void VRG_WeaponPose (float muzzle_world[3], float aim_angles[3], qboolean *valid
 	VR_ComposeViewAngles (vrg_body_yaw, angles, aim_angles);
 	aim_angles[PITCH] += vr_gunangle.value;
 	*valid = true;
+}
+
+void VRG_AimAngles (float angles[3])
+{
+	float muzzle[3], head_angles[3];
+	vr_pose_t head;
+	qboolean valid;
+
+	VRG_WeaponPose (muzzle, angles, &valid);
+	if (!valid)
+	{
+		VRG_TrackedPoses (&head, NULL, NULL);
+		VR_TrackingToQuakeAngles (&head.rot, head_angles);
+		VR_ComposeViewAngles (vrg_body_yaw, head_angles, angles);
+	}
 }

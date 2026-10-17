@@ -839,6 +839,8 @@ void SV_RunClients (void)
 		// clear client movement until a new packet is received
 			memset (&host_client->cmd, 0, sizeof(host_client->cmd));
 			host_client->hxvr_move[0] = host_client->hxvr_move[1] = 0;	/* HXVR */
+			host_client->hxvr_weapon = false;	/* HXVR */
+			host_client->hxvr_weapon_time = 0;	/* HXVR */
 			continue;
 		}
 

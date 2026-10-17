@@ -20,6 +20,9 @@ void VRG_ServerReadMoveBlock (client_t *cl)
 	vr_moveblock_t	b;
 	int		len, i;
 
+	/* HXVR: every rejected/partial block invalidates the previous weapon sample. */
+	cl->hxvr_weapon = false;
+	cl->hxvr_weapon_time = 0;
 	len = MSG_ReadByte ();
 	if (msg_badread || len < 0)
 		return;
@@ -33,7 +36,6 @@ void VRG_ServerReadMoveBlock (client_t *cl)
 		return;
 	if (!cl->netconnection || strcmp (NET_QSocketGetAddressString (cl->netconnection), "LOCAL"))
 		return;
-	cl->hxvr_weapon = false;
 	if ((b.flags & VR_MOVE_WEAPON) && VR_MuzzleOffsetOk (b.muzzle))
 	{
 		cl->hxvr_weapon = true;
