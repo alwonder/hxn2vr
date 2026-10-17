@@ -20,7 +20,7 @@ glm::mat3 rotation(const float a[3]) {
 	glm::mat4 r(1);
 	r = glm::rotate(r, glm::radians(a[1]), glm::vec3(0,0,1));
 	r = glm::rotate(r, glm::radians(a[0]), glm::vec3(0,1,0));
-	r = glm::rotate(r, glm::radians(-a[2]), glm::vec3(1,0,0));
+	r = glm::rotate(r, glm::radians(a[2]), glm::vec3(1,0,0));
 	return glm::mat3(r);
 }
 void store(const glm::vec3& v, float out[3]) {
@@ -37,17 +37,18 @@ void VR_WeaponGet(const char *model, const float mins[3], const float maxs[3], v
 	out->scale = 1;
 }
 int VR_WeaponSet(const char *model, const vr_weapon_entry_t *e) {
-	if (!model || !*model || !valid(e)) return 0;
+	if (!model || !*model || std::strchr(model, '"') || !valid(e)) return 0;
 	for (auto& o : overrides) if (o.name == model) { o.entry = *e; return 1; }
 	overrides.push_back({model, *e});
 	return 1;
 }
 int VR_WeaponCount(void) { return static_cast<int>(overrides.size()); }
+void VR_WeaponClear(void) { overrides.clear(); }
 const char *VR_WeaponName(int i) {
 	return i >= 0 && i < VR_WeaponCount() ? overrides[i].name.c_str() : nullptr;
 }
 int VR_WeaponFormat(const char *model, const vr_weapon_entry_t *e, char *buf, int cap) {
-	if (!model || !*model || !valid(e) || !buf || cap <= 0) return 0;
+	if (!model || !*model || std::strchr(model, '"') || !valid(e) || !buf || cap <= 0) return 0;
 	const int n = std::snprintf(buf, static_cast<size_t>(cap),
 		"vr_weapon_offset \"%s\" %g %g %g %g %g %g %g\n", model,
 		e->offset[0], e->offset[1], e->offset[2], e->angles[0], e->angles[1], e->angles[2], e->scale);
@@ -67,13 +68,13 @@ void VR_WeaponTransform(const float hand_org[3], const float hand_ang[3], const 
 	aim_ang[0] = glm::degrees(std::atan2(-model[0].z, horiz));
 	if (horiz > 1e-6f) {
 		aim_ang[1] = glm::degrees(std::atan2(model[0].y, model[0].x));
-		aim_ang[2] = glm::degrees(std::atan2(-model[1].z, model[2].z));
+		aim_ang[2] = glm::degrees(std::atan2(model[1].z, model[2].z));
 	} else {
 		aim_ang[1] = glm::degrees(std::atan2(-model[1].x, model[1].y));
 		aim_ang[2] = 0;
 	}
 	model_ang[0] = -aim_ang[0];
 	model_ang[1] = aim_ang[1];
-	model_ang[2] = aim_ang[2];
+	model_ang[2] = -aim_ang[2];
 }
 }

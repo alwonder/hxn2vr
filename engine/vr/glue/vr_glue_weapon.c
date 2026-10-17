@@ -98,10 +98,20 @@ static void VRG_HandWeaponPose (float muzzle_world[3], float aim_angles[3], qboo
 	*valid = true;
 }
 
+static float VRG_TransformWeapon (qmodel_t *model, const float hand_org[3], const float hand_ang[3],
+		float model_org[3], float model_ang[3], float muzzle[3], float aim[3])
+{
+	vr_weapon_entry_t entry;
+
+	VR_WeaponGet (model->name, model->mins, model->maxs, &entry);
+	VR_WeaponTransform (hand_org, hand_ang, &entry, model->mins, model->maxs, 1,
+			model_org, model_ang, muzzle, aim);
+	return entry.scale;
+}
+
 void VRG_WeaponPose (float muzzle_world[3], float aim_angles[3], qboolean *valid)
 {
 	float hand_org[3], hand_ang[3], model_org[3], model_ang[3];
-	vr_weapon_entry_t entry;
 	qmodel_t *model;
 
 	VRG_HandWeaponPose (hand_org, hand_ang, valid);
@@ -112,15 +122,13 @@ void VRG_WeaponPose (float muzzle_world[3], float aim_angles[3], qboolean *valid
 	model = VRG_WeaponModel ();
 	if (!model)
 		return; /* No model: retain the aim-pose position and angles. */
-	VR_WeaponGet (model->name, model->mins, model->maxs, &entry);
-	VR_WeaponTransform (hand_org, hand_ang, &entry, model->mins, model->maxs, 1,
+	VRG_TransformWeapon (model, hand_org, hand_ang,
 			model_org, model_ang, muzzle_world, aim_angles);
 }
 
 qboolean VRG_ViewModelPose (entity_t *e)
 {
 	float hand_org[3], hand_ang[3], muzzle[3], aim[3];
-	vr_weapon_entry_t entry;
 	qmodel_t *model;
 	qboolean valid;
 
@@ -134,10 +142,8 @@ qboolean VRG_ViewModelPose (entity_t *e)
 	if (!valid)
 		return false;
 	e->model = model;
-	VR_WeaponGet (model->name, model->mins, model->maxs, &entry);
-	VR_WeaponTransform (hand_org, hand_ang, &entry, model->mins, model->maxs, 1,
+	vrg_viewmodel_scale = VRG_TransformWeapon (model, hand_org, hand_ang,
 			e->origin, e->angles, muzzle, aim);
-	vrg_viewmodel_scale = entry.scale;
 	return true;
 }
 

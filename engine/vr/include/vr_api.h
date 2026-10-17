@@ -251,19 +251,23 @@ int VR_CompatApplies(int enabled, double block_age, float health, int deadflag, 
                      int intermission, int camera);
 
 /* Weapon entries: offsets and view-convention angles are in the hand frame.
- * R(a) = Rz(yaw) Ry(pitch) Rx(-roll). s = entry.scale * scale_units.
+ * hand_ang, entry.angles and aim_ang use Quake VIEW convention (degrees):
+ * R(a) = Rz(yaw) Ry(pitch) Rx(+roll). s = entry.scale * scale_units.
  * model_org = hand_org + R(hand_ang) * (s * offset).
  * R_model = R(hand_ang) * R(entry.angles); scale is about the model origin.
  * muzzle = model_org + R_model * (s * (maxs.x, mid_y, mid_z)).
- * model_ang is Quake entity angles (negated pitch); aim_ang is view angles.
+ * model_ang uses Quake ENTITY convention: (-aim_pitch, aim_yaw, -aim_roll),
+ * rendered as Rz(model_yaw) Ry(-model_pitch) Rx(-model_roll).
  * Models are already world units: pass scale_units = 1.
  * Get defaults to -bbox centre, zero angles, scale 1; enumeration is overrides only.
- * Name pointers remain valid until the next Set. Set rejects empty names and
+ * Name pointers remain valid until the next Set or Clear. Clear removes all overrides.
+ * Set and Format reject empty names or names containing a double quote, and
  * non-finite entries or scale <= 0. Format returns length, or 0 on failure. */
 typedef struct { float offset[3]; float angles[3]; float scale; } vr_weapon_entry_t;
 void VR_WeaponGet(const char *model, const float mins[3], const float maxs[3], vr_weapon_entry_t *out);
 int VR_WeaponSet(const char *model, const vr_weapon_entry_t *e);
 int VR_WeaponCount(void);
+void VR_WeaponClear(void);
 const char *VR_WeaponName(int i);
 int VR_WeaponFormat(const char *model, const vr_weapon_entry_t *e, char *buf, int cap);
 void VR_WeaponTransform(const float hand_org[3], const float hand_ang[3], const vr_weapon_entry_t *e,
