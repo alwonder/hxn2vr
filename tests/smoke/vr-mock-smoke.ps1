@@ -49,6 +49,9 @@
        prefix; pose invalid -> no wrapped fire, but server mana decreases.
        Short per-class cfgs finish before delayed controller presses; server edict dumps verify the class
        and mana. Each class gets three 150-frame settling waits and a 28-second event sequence.
+       After tuning, move the off-hand grip into view; hexen00 is an indicators-off baseline,
+       hexen01 is the final shot with marker and dot enabled. Check stereo and new connected
+       marker/dot colour patches against the baseline (check_shot --indicators-baseline).
     h  map demo1, mock controller only -> room-scale walking on the server (clc_hxvr): `vr_where` (A), the mock
        head walks 1 m forward over 2 s (`vr_mock_head 0 0 -1 2`), `vr_where` (B). The head leans up to the
        0.25 m radius (9.09 units), the remaining 0.75 m (27 units) goes to the local server in the VR move
@@ -169,6 +172,13 @@ $tuneCommands = @(
     'vr_mock_hand left grip 0; vr_mock_hand left stick 0',
     ((@('wait') * 20) -join '; '),
     'echo HXW_tune_after; vr_weapon_list; echo HXW_tune_after_end; vr_weapon_save; vr_weapon_tune',
+    # Mock head is (0, 1.65, 0): the grip is 0.35 m forward, 0.12 m left and 0.15 m below it.
+    # Finish tuning first so moving this hand cannot alter the saved weapon entry.
+    'vr_mock_hand left active 1; vr_mock_hand left valid 1; vr_mock_hand left px -0.12; vr_mock_hand left py 1.5; vr_mock_hand left pz -0.35; vr_offhand_marker 0; vr_aimdot 0',
+    ((@('wait') * 30) -join '; '),
+    'screenshot',  # hexen00: identical pose with both indicators disabled
+    'vr_offhand_marker 1; vr_aimdot 1',
+    ((@('wait') * 30) -join '; '),  # at least 2 s at 15 fps; 5 s at 6 fps
     'screenshot; wait; wait; wait; disconnect; quit'
 )
 $wCfgs['smoke_vr_wtune.cfg'] = (@($tuneCommands | ForEach-Object { $_; 'wait'; 'wait'; 'wait' }) -join "`n")
@@ -486,8 +496,11 @@ foreach ($s in $Scenarios) {
                 }
             }
             else {
-                $shotArgs = @('-I', $checkShot, $shot)
+                $checkedShot = $shot
+                if ($sc.Weapon) { $checkedShot = Join-Path $GameDir 'data1\shots\hexen01.tga' }
+                $shotArgs = @('-I', $checkShot, $checkedShot)
                 if ($sc.Stereo) { $shotArgs += '--stereo' }
+                if ($sc.Weapon) { $shotArgs += "--indicators-baseline=$shot" }
                 & py @shotArgs
                 if ($LASTEXITCODE -ne 0) { $why = "check_shot failed ($LASTEXITCODE)" }
             }

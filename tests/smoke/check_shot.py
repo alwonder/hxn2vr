@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Sanity-check a uHexen2 screenshot (uncompressed TGA type 2, 24/32 bpp).
 
-Usage: python -I tests/smoke/check_shot.py <tga> [--stereo]
+Usage: py -I tests/smoke/check_shot.py <tga> [--stereo] [--indicators-baseline=<tga>]
 
 Exit 0 if the image is not a single flat colour. With --stereo the image is treated
 as side-by-side stereo: the left and right halves must differ, but by no more than
@@ -11,6 +11,10 @@ half over horizontal shifts of up to 1/16 of the half width (mean absolute grey
 difference, 4x subsampled) must be at most STEREO_MATCH_MAX times the left half's
 mean absolute deviation. A mono screenshot (two unrelated halves of one view) fails
 that test: measured ratio 1.53 for a flat demo1 shot vs 0.35 for the mock-VR mirror.
+
+--indicators-baseline compares scenario w's final stereo shot to a same-pose shot
+with both indicators off. Requires new connected bluish-white marker pixels in
+the left half of the left eye and red aim-dot pixels near that eye's centre.
 """
 import sys
 
@@ -51,7 +55,9 @@ def load_tga(path):
 def main(argv):
     flags = [a for a in argv[1:] if a.startswith("--")]
     args = [a for a in argv[1:] if not a.startswith("--")]
-    if len(args) != 1 or any(f != "--stereo" for f in flags):
+    baseline_flags = [f for f in flags if f.startswith("--indicators-baseline=")]
+    if (len(args) != 1 or len(baseline_flags) > 1 or
+            any(f != "--stereo" and f not in baseline_flags for f in flags)):
         sys.stderr.write(__doc__)
         return 2
     stereo = "--stereo" in flags
@@ -60,6 +66,18 @@ def main(argv):
     except (OSError, ValueError) as e:
         sys.stderr.write("check_shot: %s\n" % e)
         return 1
+
+    if baseline_flags:
+        if not stereo:
+            sys.stderr.write("check_shot: indicator check requires --stereo\n")
+            return 2
+        try:
+            baseline = load_tga(baseline_flags[0].split("=", 1)[1])
+            if not check_indicators(w, h, bpp, rows, baseline):
+                return 1
+        except (OSError, ValueError) as e:
+            sys.stderr.write("check_shot: indicator baseline: %s\n" % e)
+            return 1
 
     # flat-colour check on the whole image (pixel bytes incl. alpha if present)
     first = rows[0][:bpp]
@@ -97,6 +115,51 @@ def main(argv):
             sys.stderr.write("check_shot: halves are not the same view (not a stereo pair)\n")
             return 1
     return 0
+
+
+def check_indicators(w, h, bpp, rows, baseline):
+    bw, bh, bbpp, brows = baseline
+    if (bw, bh) != (w, h):
+        raise ValueError("dimensions do not match the final shot")
+
+    def largest_patch(x0, x1, y0, y1, colour):
+        pixels = set()
+        for y in range(int(y0 * h), int(y1 * h)):
+            for x in range(int(x0 * w / 2), int(x1 * w / 2)):
+                i, bi = x * bpp, x * bbpp
+                b, g, r = rows[y][i:i + 3]  # TGA byte order is BGR
+                before = brows[y][bi:bi + 3]
+                if (colour(r, g, b) and
+                        max(abs(a - old) for a, old in zip((b, g, r), before)) >= 24):
+                    pixels.add((x, y))
+        # Connected area rejects isolated scene/animation changes and compression-free edge noise.
+        largest = 0
+        while pixels:
+            pending = [pixels.pop()]
+            area = 0
+            while pending:
+                x, y = pending.pop()
+                area += 1
+                for p in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+                    if p in pixels:
+                        pixels.remove(p)
+                        pending.append(p)
+            largest = max(largest, area)
+        return largest
+
+    # Alpha 0.8 over the scene: marker RGB starts at (163, 163, 204).
+    # Repeated octahedron faces move it towards (204, 204, 255).
+    marker = largest_patch(0.0, 0.5, 0.1, 0.9,
+                           lambda r, g, b: 155 <= r <= 220 and 155 <= g <= 220 and
+                           b >= 200 and b - max(r, g) >= 15 and abs(r - g) <= 12)
+    dot = largest_patch(0.3, 0.7, 0.3, 0.7,
+                        lambda r, g, b: r >= 200 and g <= 115 and b <= 100 and r - g >= 100)
+    print("check_shot: new indicator patches in left eye: marker %d px (min 12), dot %d px (min 4)" %
+          (marker, dot))
+    if marker < 12 or dot < 4:
+        sys.stderr.write("check_shot: marker or aim dot missing from final screenshot\n")
+        return False
+    return True
 
 
 def stereo_match(w, h, bpp, rows, step=4):
