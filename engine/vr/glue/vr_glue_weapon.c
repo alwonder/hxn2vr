@@ -5,11 +5,68 @@
 #include "vr_glue_int.h"
 #include "vr_glue_weapon.h"
 #include <stdlib.h>
+#include <stdio.h>
+
+#define VRG_TUNE_PROMPT "Weapon tuning: hold the off-hand grip to move the weapon,@off-hand stick up/down to scale, vr_weapon_save to keep"
 
 cvar_t vr_compat = {"vr_compat", "1", CVAR_ARCHIVE};
 cvar_t vr_gunangle = {"vr_gunangle", "0", CVAR_ARCHIVE};
 cvar_t vr_viewmodel = {"vr_viewmodel", "1", CVAR_ARCHIVE};
 static float vrg_viewmodel_scale = 1;
+static qboolean vrg_tuning, vrg_grabbed, vrg_grip_down;
+static int vrg_tune_hand;
+static qmodel_t *vrg_tune_model;
+static vr_weapon_entry_t vrg_tune_entry, vrg_grab_relative;
+
+qboolean VRG_WeaponTuning (void) { return vrg_tuning && VR_IsRunning (); }
+
+void VRG_WeaponTuneReset (void)
+{
+	vrg_tuning = vrg_grabbed = vrg_grip_down = false;
+	vrg_tune_model = NULL;
+}
+
+static void VRG_WeaponTune_f (void)
+{
+	if (vrg_tuning)
+	{
+		if (vrg_grabbed && vrg_tune_model)
+			VR_WeaponSet (vrg_tune_model->name, &vrg_tune_entry);
+		VRG_WeaponTuneReset ();
+		SCR_CenterPrint ("");
+		return;
+	}
+	if (!VR_IsRunning ()) return;
+	vrg_tuning = true;
+	vrg_tune_hand = VRG_MainHand ();
+	SCR_CenterPrint (VRG_TUNE_PROMPT);
+}
+
+static void VRG_WeaponSave_f (void)
+{
+	FILE *file;
+	int i, n = 0, failed = 0;
+	const char *name;
+	const float bounds[3] = {0, 0, 0};
+	vr_weapon_entry_t entry;
+	char line[MAX_OSPATH + 256];
+
+	if (vrg_grabbed && vrg_tune_model)
+		VR_WeaponSet (vrg_tune_model->name, &vrg_tune_entry);
+	file = fopen (FS_MakePath (FS_USERDIR, NULL, "vr_weapons.cfg"), "w");
+	if (!file) { Con_SafePrintf ("VR: could not write vr_weapons.cfg\n"); return; }
+	for (i = 0; i < VR_WeaponCount (); i++)
+	{
+		name = VR_WeaponName (i);
+		VR_WeaponGet (name, bounds, bounds, &entry);
+		if (!VR_WeaponFormat (name, &entry, line, sizeof(line)) || fputs (line, file) == EOF)
+		{ failed = 1; break; }
+		n++;
+	}
+	if (fclose (file)) failed = 1;
+	if (failed) Con_SafePrintf ("VR: could not write vr_weapons.cfg\n");
+	else Con_SafePrintf ("VR: saved %d weapon offsets to vr_weapons.cfg\n", n);
+}
 
 static void VRG_WeaponOffset_f (void)
 {
@@ -63,6 +120,8 @@ void VRG_WeaponInit (void)
 	Cvar_RegisterVariable (&vr_viewmodel);
 	Cmd_AddCommand ("vr_weapon_offset", VRG_WeaponOffset_f);
 	Cmd_AddCommand ("vr_weapon_list", VRG_WeaponList_f);
+	Cmd_AddCommand ("vr_weapon_tune", VRG_WeaponTune_f);
+	Cmd_AddCommand ("vr_weapon_save", VRG_WeaponSave_f);
 }
 
 static qmodel_t *VRG_WeaponModel (void)
@@ -104,9 +163,67 @@ static float VRG_TransformWeapon (qmodel_t *model, const float hand_org[3], cons
 	vr_weapon_entry_t entry;
 
 	VR_WeaponGet (model->name, model->mins, model->maxs, &entry);
+	if (vrg_grabbed && model == vrg_tune_model) entry = vrg_tune_entry;
 	VR_WeaponTransform (hand_org, hand_ang, &entry, model->mins, model->maxs, 1,
 			model_org, model_ang, muzzle, aim);
 	return entry.scale;
+}
+
+/* Called once per input frame, never per eye or server tick. The grab offset has
+ * scale 1 so scaling the model cannot scale its rigid displacement from the grip. */
+void VRG_WeaponTuneFrame (float dt)
+{
+	vr_pose_t head;
+	vr_hand_t hands[2], *other;
+	qmodel_t *model;
+	qboolean valid, down;
+	float hand_org[3], hand_ang[3], other_org[3], other_ang[3], angles[3];
+	float org[3], ang[3], muzzle[3], aim[3], stick[2], scale;
+
+	if (!VRG_WeaponTuning ()) return;
+	SCR_CenterPrint (VRG_TUNE_PROMPT);
+	model = VRG_WeaponModel ();
+	if (vrg_tune_hand != VRG_MainHand ()) { VRG_WeaponTuneReset (); return; }
+	if (!model || cl.v.health <= 0 ||
+		cl.intermission || cl.v.cameramode || cls.signon != SIGNONS)
+	{ vrg_grabbed = false; vrg_tune_model = NULL; return; }
+	if (vrg_tune_model != model) { vrg_grabbed = false; vrg_grip_down = false; }
+	vrg_tune_model = model;
+	VRG_TrackedPoses (&head, NULL, hands);
+	other = &hands[1 - VRG_MainHand ()];
+	VRG_HandWeaponPose (hand_org, hand_ang, &valid);
+	if (!valid || !other->active || !other->pose_valid || Key_GetDest () != key_game)
+	{ vrg_grabbed = false; vrg_grip_down = true; return; }
+	down = (other->buttons & VR_BTN_GRIP) != 0;
+	VR_EyeOrigin (cl_entities[cl.viewentity].origin, vrg_body_yaw, vrg_room.lean,
+		&head.pos, &other->grip.pos, VR_UnitsPerMetre (vrg_eye_height, vrg_world_scale),
+		VRG_HeightScale (), other_org);
+	VR_TrackingToQuakeAngles (&other->grip.rot, angles);
+	VR_ComposeViewAngles (vrg_body_yaw, angles, other_ang);
+	if (!vrg_grabbed) VR_WeaponGet (model->name, model->mins, model->maxs, &vrg_tune_entry);
+	if (down && !vrg_grip_down)
+	{
+		VR_WeaponTransform (hand_org, hand_ang, &vrg_tune_entry, model->mins, model->maxs,
+			1, org, ang, muzzle, aim);
+		VR_WeaponFromPose (other_org, other_ang, org, ang, 1, &vrg_grab_relative);
+		vrg_grabbed = true;
+	}
+	VR_StickDeadzone (other->stick, vr_stick_deadzone.value, stick);
+	scale = vrg_tune_entry.scale * (1 + 0.5f * stick[1] * q_max (dt, 0));
+	scale = q_min (q_max (scale, 0.25f), 4.0f);
+	if (vrg_grabbed)
+	{
+		VR_WeaponTransform (other_org, other_ang, &vrg_grab_relative, model->mins, model->maxs,
+			1, org, ang, muzzle, aim);
+		VR_WeaponFromPose (hand_org, hand_ang, org, ang, scale, &vrg_tune_entry);
+		if (!down) { VR_WeaponSet (model->name, &vrg_tune_entry); vrg_grabbed = false; }
+	}
+	else if (scale != vrg_tune_entry.scale)
+	{
+		vrg_tune_entry.scale = scale;
+		VR_WeaponSet (model->name, &vrg_tune_entry);
+	}
+	vrg_grip_down = down;
 }
 
 void VRG_WeaponPose (float muzzle_world[3], float aim_angles[3], qboolean *valid)

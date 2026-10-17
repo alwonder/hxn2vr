@@ -21,6 +21,46 @@ void check_vec(const float actual[3], float x, float y, float z) {
 }
 }
 
+TEST_CASE("weapon from pose inverts the transform") {
+	// for several hand poses and entries: Transform(entry) -> model pose -> FromPose -> entry' == entry (eps 1e-3)
+	struct HandPose { float org[3]; float ang[3]; };
+	const HandPose hands[] = {
+		{{0, 0, 0}, {0, 0, 0}},
+		{{100, -25, 40}, {0, 90, 0}},
+		{{-32, 16, 72}, {30, -45, 0}},
+		{{100, 0, 40}, {0, 0, 90}},
+		{{-50, 23, -8}, {-35, 170, -65}},
+		{{12, -64, 96}, {70, -130, 125}}
+	};
+	const vr_weapon_entry_t entries[] = {
+		{{-8, -2, 4}, {0, 0, 0}, 1},
+		{{1, -3, 5}, {25, -40, 35}, 0.25f},
+		{{-6, 2, -4}, {-50, 75, -80}, 1.5f},
+		{{3, 7, -2}, {15, 350, 200}, 4}
+	};
+	for (const auto& hand : hands) {
+		for (const auto& entry : entries) {
+			CAPTURE(hand.ang[0]);
+			CAPTURE(hand.ang[1]);
+			CAPTURE(hand.ang[2]);
+			CAPTURE(entry.scale);
+			float model_org[3], model_ang[3], muzzle[3], aim_ang[3];
+			VR_WeaponTransform(hand.org, hand.ang, &entry, mins, maxs, 1,
+			                   model_org, model_ang, muzzle, aim_ang);
+			vr_weapon_entry_t recovered{};
+			// Pass ENTITY angles exactly as returned, without converting to view angles.
+			VR_WeaponFromPose(hand.org, hand.ang, model_org, model_ang, entry.scale, &recovered);
+			for (int i = 0; i < 3; ++i) {
+				CAPTURE(i);
+				CHECK(std::abs(recovered.offset[i] - entry.offset[i]) <= 1e-3f);
+				// These entries have canonical pitch; normalize yaw/roll wrapping.
+				CHECK(std::abs(std::remainder(recovered.angles[i] - entry.angles[i], 360.0f)) <= 1e-3f);
+			}
+			CHECK(std::abs(recovered.scale - entry.scale) <= 1e-3f);
+		}
+	}
+}
+
 TEST_CASE("weapon default entry centres the model in the hand") {
 	WeaponTableScope table;
 	vr_weapon_entry_t entry{};

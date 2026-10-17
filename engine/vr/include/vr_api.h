@@ -264,6 +264,10 @@ int VR_CompatApplies(int enabled, double block_age, float health, int deadflag, 
  * Set and Format reject empty names or names containing a double quote, and
  * non-finite entries or scale <= 0. Format returns length, or 0 on failure. */
 typedef struct { float offset[3]; float angles[3]; float scale; } vr_weapon_entry_t;
+/* Inverse placement for scale_units = 1; model_ang is ENTITY convention.
+ * scale is the entry scale (positive); output angles use VIEW convention. */
+void VR_WeaponFromPose(const float hand_org[3], const float hand_ang[3], const float model_org[3],
+                       const float model_ang[3], float scale, vr_weapon_entry_t *out);
 void VR_WeaponGet(const char *model, const float mins[3], const float maxs[3], vr_weapon_entry_t *out);
 int VR_WeaponSet(const char *model, const vr_weapon_entry_t *e);
 int VR_WeaponCount(void);

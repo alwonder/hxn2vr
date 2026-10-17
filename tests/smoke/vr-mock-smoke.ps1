@@ -128,7 +128,7 @@ function Get-VrArgs([string]$backend) {
 $wCfgs = [ordered]@{}
 foreach ($class in 1..4) {
     $slot = if ($class -eq 1) { 4 } else { 2 }
-    $next = if ($class -lt 4) { "exec smoke_vr_w$($class + 1).cfg" } else { 'screenshot; wait; wait; wait; disconnect; quit' }
+    $next = if ($class -lt 4) { "exec smoke_vr_w$($class + 1).cfg" } else { 'exec smoke_vr_wtune.cfg' }
     $commands = @(
         'skill 1; deathmatch 0; coop 0; vr_debug_fire 1; vr_compat 1; vr_mainhand 1; vr_world_scale 1.2; vr_eye_height 1.65; vr_roomscale 0; vr_seated 0; vr_height_offset 0; vr_crouch_physical 0; vr_mock_motion 0',
         "playerclass $class; map demo1",
@@ -153,6 +153,25 @@ foreach ($class in 1..4) {
     $cfgLines = @($commands | ForEach-Object { $_; 'wait'; 'wait'; 'wait' })
     $wCfgs["smoke_vr_w$class.cfg"] = $cfgLines -join "`n"
 }
+
+# Class 4 slot 2 is models/crossbow.mdl (crossbow.hc). A zero entry makes
+# the 0.1 m tracking-X drag independently measurable in hand coordinates.
+$tuneCommands = @(
+    'vr_gunangle 0; vr_mock_hand right valid 1; vr_mock_hand left grip 0; vr_mock_hand left stick 0; vr_mock_hand left px -0.2',
+    ((@('wait') * 30) -join '; '),
+    'bind VR_OGRIP "echo HXW_TUNE_BINDING_LEAK"; bind VR_OSTICK "echo HXW_TUNE_BINDING_LEAK"',
+    'vr_weapon_offset models/crossbow.mdl 0 0 0 0 0 0 1; echo HXW_tune_before; vr_weapon_list; echo HXW_tune_before_end',
+    'vr_weapon_tune',
+    'vr_mock_hand left grip 1; vr_mock_hand left stick 1',
+    ((@('wait') * 20) -join '; '),
+    'vr_mock_hand left px -0.1',
+    ((@('wait') * 20) -join '; '),
+    'vr_mock_hand left grip 0; vr_mock_hand left stick 0',
+    ((@('wait') * 20) -join '; '),
+    'echo HXW_tune_after; vr_weapon_list; echo HXW_tune_after_end; vr_weapon_save; vr_weapon_tune',
+    'screenshot; wait; wait; wait; disconnect; quit'
+)
+$wCfgs['smoke_vr_wtune.cfg'] = (@($tuneCommands | ForEach-Object { $_; 'wait'; 'wait'; 'wait' }) -join "`n")
 
 $all = [ordered]@{
     w = @{ Commands = @('exec smoke_vr_w1.cfg'); Stereo = $true; Weapon = $true; ExpectQuit = $true; Shot = $true; WaitLines = 3; TimeoutSec = 600; Pending = $false }
@@ -322,6 +341,32 @@ function Test-VrLog([string]$path, $sc) {
     }
     if ($sc.Weapon) {
         $text = $lines -join "`n"
+        if ($lines -ccontains 'HXW_TUNE_BINDING_LEAK') { return 'tuning leaked the off-hand grip/stick to bindings' }
+        $entries = @()
+        foreach ($phase in @('before', 'after')) {
+            $window = [regex]::Match($text, "(?ms)^HXW_tune_${phase}[^\S\n]*\n(.*?)^HXW_tune_${phase}_end[^\S\n]*$")
+            if (-not $window.Success) { return "missing tune $phase window" }
+            $entry = [regex]::Match($window.Groups[1].Value, '(?m)^vr_weapon_offset "models/crossbow\.mdl" ([^\r\n]+)')
+            if (-not $entry.Success) { return "missing crossbow entry $phase tuning" }
+            $values = @($entry.Groups[1].Value.Trim() -split '\s+' | ForEach-Object { [double]::Parse($_, [cultureinfo]::InvariantCulture) })
+            if ($values.Count -ne 7) { return "invalid tune $phase entry" }
+            $entries += ,$values
+        }
+        foreach ($axis in 0..2) {
+            if ([math]::Abs($entries[0][$axis]) -gt 0.001) { return 'tune baseline offset is not zero' }
+            $expected = if ($axis -eq 1) { -0.1 * 50 / 1.65 * 1.2 } else { 0 }
+            if ([math]::Abs($entries[1][$axis] - $expected) -gt 0.05) { return "grab did not move entry axis $axis by expected $expected units" }
+        }
+        foreach ($axis in 3..5) {
+            if ([math]::Abs($entries[1][$axis]) -gt 0.01) { return 'translation-only grab rotated the entry' }
+        }
+        if ([math]::Abs($entries[1][6] - 1) -gt 0.001) { return 'translation-only grab changed scale' }
+        if (-not ($vrLines -ccontains 'VR: saved 1 weapon offsets to vr_weapons.cfg')) { return 'missing weapon save confirmation' }
+        $weaponCfg = Join-Path $GameDir 'data1\vr_weapons.cfg'
+        if (-not (Test-Path -LiteralPath $weaponCfg)) { return "no saved weapon cfg at $weaponCfg" }
+        $saved = @([IO.File]::ReadAllLines($weaponCfg))
+        $afterEntry = [regex]::Match($text, '(?ms)^HXW_tune_after[^\S\n]*\n(vr_weapon_offset "models/crossbow\.mdl" [^\r\n]+)')
+        if ($saved.Count -ne 1 -or -not $afterEntry.Success -or $saved[0] -cne $afterEntry.Groups[1].Value) { return 'saved cfg does not match the moved entry from vr_weapon_list' }
         $num = '(-?\d+(?:\.\d+)?)'
         $fireRe = "^VR: fire muzzle $num $num $num body $num $num $num proj $num $num $num$"
         foreach ($class in 1..4) {
@@ -374,6 +419,7 @@ function Test-VrLog([string]$path, $sc) {
     # Expected VR: lines are the start/stop/recenter/default-bindings notices (and vr_where output); anything else is an error report.
     $bad = @($vrLines | Where-Object { $_ -cne 'VR: started (mock)' -and $_ -cne 'VR: stopped' -and $_ -cne 'VR: recentered' -and
         $_ -cne 'VR: default controller bindings set' -and $_ -cnotmatch '^VR: where ' -and
+        -not ($sc.Weapon -and $_ -ceq 'VR: saved 1 weapon offsets to vr_weapons.cfg') -and
         $_ -cnotmatch '^VR: calibration done: ' -and -not ($sc.Weapon -and $_ -cmatch '^VR: (?:last )?fire muzzle -?\d+\.\d{3} -?\d+\.\d{3} -?\d+\.\d{3} body -?\d+\.\d{3} -?\d+\.\d{3} -?\d+\.\d{3} proj -?\d+\.\d{3} -?\d+\.\d{3} -?\d+\.\d{3}$') })
     if ($bad.Count) { return "log has VR error line(s): $($bad -join ' | ')" }
     return $null
@@ -403,6 +449,11 @@ foreach ($s in $Scenarios) {
     $wBackups = @{}
     try {
         if ($sc.Weapon) {
+            # Isolate the auto-loaded tuning file. FS_USERDIR is data1 under
+            # the Windows user base (GameDir), as for config.cfg.
+            $weaponCfg = Join-Path $GameDir 'data1\vr_weapons.cfg'
+            $wBackups[$weaponCfg] = if (Test-Path -LiteralPath $weaponCfg) { [IO.File]::ReadAllBytes($weaponCfg) } else { $null }
+            Remove-Item -LiteralPath $weaponCfg -Force -ErrorAction SilentlyContinue
             foreach ($name in $wCfgs.Keys) {
                 $path = Join-Path $GameDir "data1\$name"
                 $wBackups[$path] = if (Test-Path -LiteralPath $path) { [IO.File]::ReadAllBytes($path) } else { $null }

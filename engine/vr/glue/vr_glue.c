@@ -289,6 +289,7 @@ static void VRG_Start (void)
 
 static void VRG_Stop (void)
 {
+	VRG_WeaponTuneReset ();
 	VRG_ReleaseAllKeys ();	/* no +attack / +jump stays held by a controller button */
 	VRG_CalibrateReset ();
 	VRG_EndFrame ();

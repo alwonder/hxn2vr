@@ -183,6 +183,7 @@ void VRG_InputFrame (void)
 	/* after each Key_Event: stop if it ran another input frame, a VR start or a release of all keys
 	 * (vrg_in_serial moved on) */
 	serial = ++vrg_in_serial;
+	VRG_WeaponTuneFrame (dt);
 #define VRG_INTERRUPTED()	(vrg_in_serial != serial)
 	for (hand = 0; hand < 2; hand++)
 	{
@@ -197,6 +198,17 @@ void VRG_InputFrame (void)
 		for (b = 0; b < VRG_NUM_BUTTONS; b++)
 		{
 			const unsigned	bit = vrg_button_bit[b];
+
+			if (role == 1 && VRG_WeaponTuning () && (bit & (VR_BTN_GRIP | VR_BTN_STICK)))
+			{
+				/* Keep physical edges: leaving tune while held must not press a binding. */
+				vrg_in_buttons[hand] = (vrg_in_buttons[hand] & ~bit) | (down & bit);
+				key = vrg_in_key[hand][b];
+				vrg_in_key[hand][b] = 0;
+				if (key) VRG_KeyUp (key);
+				if (VRG_INTERRUPTED ()) return;
+				continue;
+			}
 
 			/* the stored state is updated before Key_Event, which may re-enter or not return */
 			if ((vrg_in_buttons[hand] & bit) && !(down & bit))
@@ -227,7 +239,7 @@ void VRG_InputFrame (void)
 		dest = Key_GetDest ();
 		if (!vrg_input_modal && (dest == key_menu || dest == key_console))
 		{
-			if (h.active)
+			if (h.active && !(role == 1 && VRG_WeaponTuning ()))
 			{
 				stick[0] = h.stick[0];
 				stick[1] = h.stick[1];
@@ -288,7 +300,7 @@ void VRG_StickMove (usercmd_t *cmd)
 	vr_pose_t	head_pose;
 	float		head[3], stick[2], move[2], move_yaw, view[3];
 
-	if (!VRG_StickGameplay ())
+	if (!VRG_StickGameplay () || VRG_WeaponTuning ())
 		return;
 	VRG_TrackedPoses (&head_pose, NULL, hands);
 	h = hands[1 - VRG_MainHand ()];
@@ -330,7 +342,7 @@ float VRG_VignetteAmount (void)
 
 		VR_GetHand (VRG_MainHand (), &main_h);
 		VR_GetHand (1 - VRG_MainHand (), &other);
-		if (other.active)
+		if (other.active && !VRG_WeaponTuning ())
 		{
 			VR_StickDeadzone (other.stick, vr_stick_deadzone.value, out);
 			target = sqrtf (out[0] * out[0] + out[1] * out[1]);
@@ -402,6 +414,7 @@ void VRG_InputStart (void)
 	int	i;
 
 	vrg_in_serial++;	/* an input frame this start interrupted stops */
+	VRG_WeaponTuneReset ();
 	memset (vrg_in_buttons, 0, sizeof(vrg_in_buttons));
 	memset (vrg_in_key, 0, sizeof(vrg_in_key));
 	memset (vrg_in_repeat, 0, sizeof(vrg_in_repeat));

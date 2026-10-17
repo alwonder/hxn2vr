@@ -29,6 +29,25 @@ void store(const glm::vec3& v, float out[3]) {
 }
 
 extern "C" {
+void VR_WeaponFromPose(const float hand_org[3], const float hand_ang[3], const float model_org[3],
+                       const float model_ang[3], float scale, vr_weapon_entry_t *out) {
+	if (!out || !std::isfinite(scale) || scale <= 0) return;
+	const glm::mat3 inverse_hand = glm::transpose(rotation(hand_ang));
+	const float view[3] = {-model_ang[0], model_ang[1], -model_ang[2]};
+	const glm::mat3 relative = inverse_hand * rotation(view);
+	store(inverse_hand * (glm::vec3(model_org[0], model_org[1], model_org[2])
+		- glm::vec3(hand_org[0], hand_org[1], hand_org[2])) / scale, out->offset);
+	const float horiz = std::hypot(relative[0].x, relative[0].y);
+	out->angles[0] = glm::degrees(std::atan2(-relative[0].z, horiz));
+	if (horiz > 1e-6f) {
+		out->angles[1] = glm::degrees(std::atan2(relative[0].y, relative[0].x));
+		out->angles[2] = glm::degrees(std::atan2(relative[1].z, relative[2].z));
+	} else {
+		out->angles[1] = glm::degrees(std::atan2(-relative[1].x, relative[1].y));
+		out->angles[2] = 0;
+	}
+	out->scale = scale;
+}
 void VR_WeaponGet(const char *model, const float mins[3], const float maxs[3], vr_weapon_entry_t *out) {
 	if (!out) return;
 	for (const auto& o : overrides) if (model && o.name == model) { *out = o.entry; return; }
