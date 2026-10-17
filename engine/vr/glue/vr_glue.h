@@ -83,6 +83,11 @@ qboolean VRG_CrouchHeld (void);
 /* SV_ReadClientMessage, case clc_hxvr: reads the block; its room-scale move adds to cl->hxvr_move
  * (vr_glue_server.c; sv_phys.c applies the sum on the next physics tick). */
 void VRG_ServerReadMoveBlock (client_t *cl);
+extern cvar_t vr_compat;
+extern cvar_t vr_debug_fire;
+void VRG_ServerFireBegin (void);
+void VRG_ServerFireEnd (edict_t *player, const float muzzle[3], const float body[3]);
+void VRG_FireInfo_f (void);
 
 /* Implemented by the video driver (gl_vidnt.c): blocks sound while the window is unfocused, except
  * while a VR session runs. The glue calls it when VR starts / stops. */

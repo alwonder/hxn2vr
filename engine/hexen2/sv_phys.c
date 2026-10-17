@@ -22,6 +22,7 @@
 
 #include "quakedef.h"
 #include "vr_api.h"	/* HXVR: VR_RoomscaleMoveOk */
+#include "vr_glue.h"	/* HXVR */
 
 /*
 
@@ -1712,8 +1713,68 @@ SV_Physics_Client
 Player character actions
 ================
 */
+/* HXVR: only progs sees the temporary origin; collision keeps the body's linked bounds. */
+static vec3_t sv_hxvr_muzzle;
+static qboolean SV_HXVR_CompatBegin (edict_t *ent, client_t *client, vec3_t real)
+{
+	eval_t *ofs, *view;
+	vec3_t start, muzzle;
+	trace_t trace;
+	int camera;
+
+	if (!vr_enabled.value || !vr_compat.value || !client->spawned || !client->hxvr_weapon)
+		return false;
+	view = GetEdictFieldValue (ent, "viewentity");
+	camera = ent->v.cameramode || (view && view->edict != EDICT_TO_PROG(ent));
+	/* Samples are accepted only from the local client, so its intermission state applies. */
+	if (!VR_CompatApplies (vr_compat.value != 0, sv.time - client->hxvr_weapon_time,
+		ent->v.health, ent->v.deadflag != 0, (int)ent->v.movetype, cl.intermission, camera))
+		return false;
+	ofs = GetEdictFieldValue (ent, "proj_ofs");
+	if (!ofs || !ent->v.weaponmodel || !PR_GetString(ent->v.weaponmodel)[0])
+		return false;
+	VectorCopy (ent->v.origin, real);
+	VectorAdd (real, ent->v.view_ofs, start);
+	VectorAdd (real, client->hxvr_muzzle, muzzle);
+	trace = SV_Move (start, vec3_origin, vec3_origin, muzzle, MOVE_NOMONSTERS, ent);
+	VR_CompatClampMuzzle (start, muzzle, trace.startsolid || trace.allsolid ? 0 : trace.fraction,
+			sv_hxvr_muzzle);
+	VR_CompatOrigin (sv_hxvr_muzzle, ofs->vector, ent->v.origin);
+	VectorCopy (client->hxvr_aim, ent->v.v_angle);
+	AngleVectors (ent->v.v_angle, *sv_globals.v_forward, *sv_globals.v_right, *sv_globals.v_up);
+	VRG_ServerFireBegin ();
+	return true;
+}
+
+static void SV_HXVR_CompatEnd (edict_t *ent, const vec3_t real, const vec3_t swapped)
+{
+	qboolean moved;
+	moved = !VectorCompare (ent->v.origin, swapped);
+	VRG_ServerFireEnd (ent, sv_hxvr_muzzle, real);
+	if (ent->free)
+		return;
+	VR_CompatRestore (real, swapped, ent->v.origin, ent->v.origin);
+	if (moved)
+		SV_LinkEdict (ent, true);
+}
+
+static qboolean SV_HXVR_RunThink (edict_t *ent, client_t *client)
+{
+	vec3_t real, swapped;
+	qboolean wrapped, result;
+	wrapped = SV_HXVR_CompatBegin (ent, client, real);
+	VectorCopy (ent->v.origin, swapped);
+	result = SV_RunThink (ent);
+	if (wrapped)
+		SV_HXVR_CompatEnd (ent, real, swapped);
+	return result;
+} /* HXVR */
+
 static void SV_Physics_Client (edict_t *ent, int num)
 {
+	/* HXVR */
+	vec3_t real, swapped;
+	qboolean wrapped;
 	if ( ! svs.clients[num-1].active )
 		return;		// unconnected slot
 
@@ -1735,12 +1796,12 @@ static void SV_Physics_Client (edict_t *ent, int num)
 	switch ((int)ent->v.movetype)
 	{
 	case MOVETYPE_NONE:
-		if (!SV_RunThink (ent))
+		if (!SV_HXVR_RunThink (ent, &svs.clients[num-1])) /* HXVR */
 			return;
 		break;
 
 	case MOVETYPE_WALK:
-		if (!SV_RunThink (ent))
+		if (!SV_HXVR_RunThink (ent, &svs.clients[num-1])) /* HXVR */
 			return;
 		if (!SV_CheckWater (ent) && ! ((int)ent->v.flags & FL_WATERJUMP) )
 			SV_AddGravity (ent);
@@ -1762,7 +1823,7 @@ static void SV_Physics_Client (edict_t *ent, int num)
 
 	case MOVETYPE_FLY:
 	case MOVETYPE_SWIM:
-		if (!SV_RunThink (ent))
+		if (!SV_HXVR_RunThink (ent, &svs.clients[num-1])) /* HXVR */
 			return;
 		SV_CheckWater (ent);
 		SV_FlyMove (ent, host_frametime, NULL);
@@ -1770,7 +1831,7 @@ static void SV_Physics_Client (edict_t *ent, int num)
 		break;
 
 	case MOVETYPE_NOCLIP:
-		if (!SV_RunThink (ent))
+		if (!SV_HXVR_RunThink (ent, &svs.clients[num-1])) /* HXVR */
 			return;
 		VectorMA (ent->v.origin, host_frametime, ent->v.velocity, ent->v.origin);
 		break;
@@ -1788,7 +1849,13 @@ static void SV_Physics_Client (edict_t *ent, int num)
 
 	*sv_globals.time = sv.time;
 	*sv_globals.self = EDICT_TO_PROG(ent);
+	/* HXVR */
+	wrapped = SV_HXVR_CompatBegin (ent, &svs.clients[num-1], real);
+	VectorCopy (ent->v.origin, swapped);
 	PR_ExecuteProgram (*sv_globals.PlayerPostThink);
+	if (wrapped)
+		SV_HXVR_CompatEnd (ent, real, swapped);
+	/* HXVR */
 }
 
 

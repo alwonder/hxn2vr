@@ -35,6 +35,8 @@ void VRG_InputInit (void)
 	Cvar_RegisterVariable (&vr_stick_deadzone);
 	Cvar_RegisterVariable (&vr_vignette);
 	Cvar_RegisterVariable (&vr_vignette_strength);
+	Cvar_RegisterVariable (&vr_debug_fire);
+	Cmd_AddCommand ("vr_fireinfo", VRG_FireInfo_f);
 	Cmd_AddCommand ("vr_where", VRG_Where_f);
 	Cmd_AddCommand ("vr_bind_defaults", VRG_BindDefaults_f);
 	Cmd_AddCommand ("vr_mock_hand", VRG_MockHand_f);

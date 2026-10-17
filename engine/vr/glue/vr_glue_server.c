@@ -9,6 +9,53 @@
 #include "vr_api.h"
 #include "vr_glue.h"
 
+cvar_t vr_debug_fire = {"vr_debug_fire", "0", CVAR_NONE};
+static qboolean vrg_fire_free[MAX_EDICTS];
+static int vrg_fire_count = -1;
+static char vrg_last_fire[512];
+
+/* Snapshot only when requested: appended slots and previously free slots are new entities.
+ * Do this for each progs call, not each tick: an existing missile must not count again. */
+void VRG_ServerFireBegin (void)
+{
+	int i;
+	vrg_fire_count = -1;
+	if (!vr_debug_fire.value)
+		return;
+	vrg_fire_count = sv.num_edicts;
+	for (i = 0; i < vrg_fire_count; i++)
+		vrg_fire_free[i] = EDICT_NUM(i)->free;
+}
+
+void VRG_ServerFireEnd (edict_t *player, const float muzzle[3], const float body[3])
+{
+	int i;
+	edict_t *e;
+	if (vrg_fire_count < 0)
+		return;
+	for (i = 1; i < sv.num_edicts; i++)
+	{
+		e = EDICT_NUM(i);
+		if ((i >= vrg_fire_count || vrg_fire_free[i]) && !e->free &&
+		    e->v.owner == EDICT_TO_PROG(player))
+		{
+			q_snprintf (vrg_last_fire, sizeof(vrg_last_fire), "VR: fire muzzle %.3f %.3f %.3f body %.3f %.3f %.3f\n",
+				muzzle[0], muzzle[1], muzzle[2], body[0], body[1], body[2]);
+			Con_SafePrintf ("%s", vrg_last_fire);
+			break;
+		}
+	}
+	vrg_fire_count = -1;
+}
+
+void VRG_FireInfo_f (void)
+{
+	if (vrg_last_fire[0])
+		Con_SafePrintf ("%s", vrg_last_fire);
+	else
+		Con_SafePrintf ("VR: no wrapped fire recorded\n");
+}
+
 /* clc_hxvr (SV_ReadClientMessage): u8 len, len bytes of the move block. The bytes are always consumed;
  * a block that is too long, unreadable or from a client that is not the local one (the loopback socket
  * of a listen server is "LOCAL") is ignored. A room-scale move adds to cl->hxvr_move: several messages

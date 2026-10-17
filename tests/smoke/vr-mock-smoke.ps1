@@ -44,6 +44,10 @@
        The checked picture (hexen00) is the `screenshot` taken just before the left stick is released, with the
        default `vr_vignette 1`: the comfort vignette is on screen and the shot must still pass check_shot --stereo.
        (The final screenshot of the run-smoke wrapper is hexen01 and is not checked.)
+    w  all four classes, one process -> tracked projectile muzzle > 8 units right of the body,
+       vr_fireinfo repeats the last fire line; pose invalid -> no wrapped fire, but server mana decreases.
+       Short per-class cfgs finish before delayed controller presses; server edict dumps verify the class
+       and mana. Each class gets three 150-frame settling waits and a 28-second event sequence.
     h  map demo1, mock controller only -> room-scale walking on the server (clc_hxvr): `vr_where` (A), the mock
        head walks 1 m forward over 2 s (`vr_mock_head 0 0 -1 2`), `vr_where` (B). The head leans up to the
        0.25 m radius (9.09 units), the remaining 0.75 m (27 units) goes to the local server in the VR move
@@ -86,7 +90,7 @@
 [CmdletBinding()]
 param(
     [string]$Exe = 'build/win64/Debug/hxn2vr.exe',
-    [string[]]$Scenarios = @('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'm'),
+    [string[]]$Scenarios = @('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'm', 'w'),
     [string]$GameDir = 'build/game',
     [switch]$IncludePending,
     [int]$TimeoutSec = 180,
@@ -116,7 +120,41 @@ function Get-VrArgs([string]$backend) {
     @('-condebug', '+vr_backend', $backend, '+vr_mirror', '2', '+vr_enabled', '1') + @($ExtraArgs | ForEach-Object { $_ -split ' ' } | Where-Object { $_ })
 }
 
+# w uses four short cfgs in one process. Each cfg finishes before the delayed buttons fire:
+# controller bindings append commands to Cbuf and must not sit behind a waiting test script.
+# Sources: weapons.hc W_ChangeWeapon/W_Attack/CheatCommand; impulse.hc (9 requires skill < 3).
+# Class 1 = purifier slot 4; classes 2/3/4 = ice staff/magic missile/crossbow slot 2.
+$wCfgs = [ordered]@{}
+foreach ($class in 1..4) {
+    $slot = if ($class -eq 1) { 4 } else { 2 }
+    $next = if ($class -lt 4) { "exec smoke_vr_w$($class + 1).cfg" } else { 'screenshot; wait; wait; wait; disconnect; quit' }
+    $commands = @(
+        'skill 1; deathmatch 0; coop 0; vr_debug_fire 1; vr_compat 1; vr_mainhand 1; vr_world_scale 1.2; vr_eye_height 1.65; vr_roomscale 0; vr_seated 0; vr_height_offset 0; vr_crouch_physical 0; vr_mock_motion 0',
+        "playerclass $class; map demo1",
+        ((@('wait') * 150) -join '; '),
+        'menu_main; togglemenu; god; notarget; impulse 9',
+        ((@('wait') * 150) -join '; '),
+        "impulse $slot",
+        ((@('wait') * 150) -join '; '),
+        'vr_mock_hand right valid 1; vr_mock_hand right active 1; vr_mock_hand right px 0.4; vr_mock_hand right py 1.2; vr_mock_hand right pz -0.3',
+        'bind VR_TRIGGER +attack',
+        "alias wtracked `"echo HXW_${class}_tracked_end; vr_fireinfo`"; bind VR_X wtracked",
+        "alias wbefore `"echo HXW_${class}_untracked_begin; edict 1`"; bind VR_Y wbefore",
+        "alias wafter `"edict 1; echo HXW_${class}_untracked_end`"; bind VR_OSTICK wafter",
+        "alias wnext `"$next`"; bind VR_OGRIP wnext",
+        "echo HXW_${class}_tracked_begin; vr_where",
+        # Two seconds held, then three seconds for the firing animation/cooldown to settle.
+        'vr_mock_hand right trigger 1 2; vr_mock_hand right trigger 0 4; vr_mock_hand left a 1 7; vr_mock_hand left a 0 8',
+        # valid controls pose tracking, not active/buttons: the untracked trigger still attacks.
+        'vr_mock_hand right valid 0 9; vr_mock_hand left b 1 12; vr_mock_hand left b 0 13; vr_mock_hand right trigger 1 15; vr_mock_hand right trigger 0 17',
+        'vr_mock_hand left stick 1 22; vr_mock_hand left stick 0 23; vr_mock_hand left grip 1 28; vr_mock_hand left grip 0 29'
+    )
+    $cfgLines = @($commands | ForEach-Object { $_; 'wait'; 'wait'; 'wait' })
+    $wCfgs["smoke_vr_w$class.cfg"] = $cfgLines -join "`n"
+}
+
 $all = [ordered]@{
+    w = @{ Commands = @('exec smoke_vr_w1.cfg'); Stereo = $true; Weapon = $true; ExpectQuit = $true; Shot = $true; WaitLines = 3; TimeoutSec = 600; Pending = $false }
     a = @{ Commands = @('map demo1'); Stereo = $true; Pending = $false; Recenter = $true }   # auto-recenter must have run
     b = @{ Commands = @('map demo1', 'changelevel demo2'); Stereo = $true; Pending = $false }
     c = @{ Commands = @('echo vr-mock-smoke: console only'); Stereo = $false; Pending = $false }   # 2D panel with no world
@@ -281,10 +319,54 @@ function Test-VrLog([string]$path, $sc) {
         if ($p[4].CrouchKey -ne 1 -or $p[4].Held -lt 1) { return "B in the game did not hold +crouch (expected crouchkey 1): $($w[4])" }
         if ($p[5].Held -ne 0 -or $p[5].CrouchKey -ne 0) { return "B released in the menu left a key held (expected held 0, crouchkey 0): $($w[5])" }
     }
+    if ($sc.Weapon) {
+        $text = $lines -join "`n"
+        $num = '(-?\d+(?:\.\d+)?)'
+        $fireRe = "^VR: fire muzzle $num $num $num body $num $num $num$"
+        foreach ($class in 1..4) {
+            $tracked = [regex]::Matches($text, "(?ms)^HXW_${class}_tracked_begin[^\S\n]*\n(.*?)^HXW_${class}_tracked_end[^\S\n]*$")
+            if ($tracked.Count -ne 1) { return "class ${class}: missing/duplicate tracked window" }
+            $section = $tracked[0].Groups[1].Value
+            $where = [regex]::Match($section, '(?m)^VR: where origin \S+ \S+ \S+ yaw (-?\d+(?:\.\d+)?) ')
+            if (-not $where.Success) { return "class ${class}: missing body yaw" }
+            $yaw = [double]::Parse($where.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture) * [Math]::PI / 180
+            $fires = @($section -split "`n" | ForEach-Object { $_.TrimEnd("`r") } | Where-Object { $_ -cmatch $fireRe })
+            if ($fires.Count -lt 1) { return "class ${class}: no wrapped projectile" }
+            foreach ($fire in $fires) {
+                [void]($fire -cmatch $fireRe)
+                $dx = [double]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture) - [double]::Parse($Matches[4], [Globalization.CultureInfo]::InvariantCulture)
+                $dy = [double]::Parse($Matches[2], [Globalization.CultureInfo]::InvariantCulture) - [double]::Parse($Matches[5], [Globalization.CultureInfo]::InvariantCulture)
+                $right = $dx * [Math]::Sin($yaw) - $dy * [Math]::Cos($yaw)
+                if ($right -le 8) { return "class ${class}: muzzle is only $right units to the right (expected > 8): $fire" }
+            }
+            # vr_fireinfo must replay the last line, outside the firing window.
+            $info = [regex]::Match($text, "(?m)^HXW_${class}_tracked_end[^\S\n]*\n([^\r\n]+)")
+            if (-not $info.Success -or $info.Groups[1].Value -cne $fires[-1]) { return "class ${class}: vr_fireinfo did not replay the last wrapped fire" }
+            $untracked = [regex]::Matches($text, "(?ms)^HXW_${class}_untracked_begin[^\S\n]*\n(.*?)^HXW_${class}_untracked_end[^\S\n]*$")
+            if ($untracked.Count -ne 1) { return "class ${class}: missing/duplicate untracked window" }
+            $section = $untracked[0].Groups[1].Value
+            if ($section -cmatch '(?m)^VR: fire') { return "class ${class}: wrapper ran with an untracked hand" }
+            $dumps = [regex]::Matches($section, '(?ms)^EDICT 1:\r?\n(.*?)(?=^EDICT 1:|\z)')
+            if ($dumps.Count -ne 2) { return "class ${class}: expected two server player dumps" }
+            $mana = @()
+            foreach ($dump in $dumps) {
+                $sum = 0.0
+                foreach ($field in @('bluemana', 'greenmana')) {
+                    $m = [regex]::Match($dump.Groups[1].Value, "(?m)^$field\s+(-?\d+(?:\.\d+)?)\s*$")
+                    # ED_Print omits zero-valued fields.
+                    if ($m.Success) { $sum += [double]::Parse($m.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture) }
+                }
+                $pc = [regex]::Match($dump.Groups[1].Value, '(?m)^playerclass\s+(\d+(?:\.\d+)?)\s*$')
+                if (-not $pc.Success -or [double]::Parse($pc.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture) -ne $class) { return "class ${class}: server playerclass mismatch" }
+                $mana += $sum
+            }
+            if ($mana[0] - $mana[1] -lt 0.5) { return "class ${class}: untracked shot consumed no mana ($($mana -join ' -> '))" }
+        }
+    }
     # Expected VR: lines are the start/stop/recenter/default-bindings notices (and vr_where output); anything else is an error report.
     $bad = @($vrLines | Where-Object { $_ -cne 'VR: started (mock)' -and $_ -cne 'VR: stopped' -and $_ -cne 'VR: recentered' -and
         $_ -cne 'VR: default controller bindings set' -and $_ -cnotmatch '^VR: where ' -and
-        $_ -cnotmatch '^VR: calibration done: ' })
+        $_ -cnotmatch '^VR: calibration done: ' -and -not ($sc.Weapon -and $_ -cmatch '^VR: fire muzzle -?\d+\.\d{3} -?\d+\.\d{3} -?\d+\.\d{3} body -?\d+\.\d{3} -?\d+\.\d{3} -?\d+\.\d{3}$') })
     if ($bad.Count) { return "log has VR error line(s): $($bad -join ' | ')" }
     return $null
 }
@@ -292,7 +374,7 @@ function Test-VrLog([string]$path, $sc) {
 $failed = @()
 $results = @()
 foreach ($s in $Scenarios) {
-    if (-not $all.Contains($s)) { throw "unknown scenario '$s' (a, b, c, d, e, f, g, h, m)" }
+    if (-not $all.Contains($s)) { throw "unknown scenario '$s' (a, b, c, d, e, f, g, h, m, w)" }
     $sc = $all[$s]
     if ($sc.Pending -and -not $IncludePending) {
         Write-Host "vr-mock-smoke ($s): PENDING (skipped; -IncludePending to run)"
@@ -310,7 +392,15 @@ foreach ($s in $Scenarios) {
     }
     $why = $null
     $skip = $false
+    $wBackups = @{}
     try {
+        if ($sc.Weapon) {
+            foreach ($name in $wCfgs.Keys) {
+                $path = Join-Path $GameDir "data1\$name"
+                $wBackups[$path] = if (Test-Path -LiteralPath $path) { [IO.File]::ReadAllBytes($path) } else { $null }
+                [IO.File]::WriteAllText($path, $wCfgs[$name], [Text.Encoding]::ASCII)
+            }
+        }
         try {
             $runArgs = @{ Exe = $Exe; Name = "vr_$s"; Commands = $sc.Commands; ExtraArgs = (Get-VrArgs $backend)
                 GameDir = $GameDir; TimeoutSec = $TimeoutSec }
@@ -345,6 +435,10 @@ foreach ($s in $Scenarios) {
         }
     }
     finally {
+        foreach ($path in $wBackups.Keys) {
+            if ($null -ne $wBackups[$path]) { [IO.File]::WriteAllBytes($path, $wBackups[$path]) }
+            else { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+        }
         # Clean-up must not abort the remaining scenarios (e.g. a log still locked by a killed engine).
         try {
             if ($null -ne $cfgBackup) { [System.IO.File]::WriteAllBytes($config, $cfgBackup) }

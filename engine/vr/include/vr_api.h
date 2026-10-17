@@ -237,6 +237,16 @@ int VR_MuzzleOffsetOk(const float muzzle[3]);
 /* server sanity: finite, and |accumulated move| <= 64 units (0 for NULL) */
 int VR_RoomscaleMoveOk(const float move[2]);
 
+/* Stock-progs compatibility: origin + proj_ofs must equal the muzzle. */
+void VR_CompatOrigin(const float muzzle[3], const float proj_ofs[3], float out[3]);
+/* Trace fraction < 1 pulls the muzzle back two units along the trace, never past start. */
+void VR_CompatClampMuzzle(const float start[3], const float muzzle[3], float fraction, float out[3]);
+/* Restore real + (after - swapped), preserving movement made by progs. */
+void VR_CompatRestore(const float real[3], const float swapped[3], const float after[3], float out[3]);
+/* Fresh age in [0, 0.1], alive, WALK/FLY/NOCLIP/SWIM, outside intermission/camera. */
+int VR_CompatApplies(int enabled, double block_age, float health, int deadflag, int movetype,
+                     int intermission, int camera);
+
 /* pure math */
 float VR_UnitsPerMetre(float eye_height_m, float world_scale);
 void  VR_TrackingToQuakePos(const vr_vec3_t *v, float upm, float out[3]);
