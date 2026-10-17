@@ -134,6 +134,7 @@ foreach ($class in 1..4) {
     $next = if ($class -lt 4) { "exec smoke_vr_w$($class + 1).cfg" } else { 'exec smoke_vr_wtune.cfg' }
     $commands = @(
         'skill 1; deathmatch 0; coop 0; vr_debug_fire 1; vr_compat 1; vr_mainhand 1; vr_world_scale 1.2; vr_eye_height 1.65; vr_roomscale 0; vr_seated 0; vr_height_offset 0; vr_crouch_physical 0; vr_mock_motion 0',
+        'vr_haptics 1; vr_haptics_strength 1',
         "playerclass $class; map demo1",
         ((@('wait') * 150) -join '; '),
         'menu_main; togglemenu; god; notarget; impulse 9',
@@ -388,6 +389,7 @@ function Test-VrLog([string]$path, $sc) {
             $yaw = [double]::Parse($where.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture) * [Math]::PI / 180
             $fires = @($section -split "`n" | ForEach-Object { $_.TrimEnd("`r") } | Where-Object { $_ -cmatch $fireRe })
             if ($fires.Count -lt 1) { return "class ${class}: no wrapped projectile" }
+            if ($section -cnotmatch '(?ms)^VR: fire muzzle [^\n]*\n.*?^VR: haptic 1 0\.6 0\.04\r?$') { return "class ${class}: no right-hand weapon haptic after firing" }
             foreach ($fire in $fires) {
                 [void]($fire -cmatch $fireRe)
                 $dx = [double]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture) - [double]::Parse($Matches[4], [Globalization.CultureInfo]::InvariantCulture)
@@ -430,6 +432,7 @@ function Test-VrLog([string]$path, $sc) {
     $bad = @($vrLines | Where-Object { $_ -cne 'VR: started (mock)' -and $_ -cne 'VR: stopped' -and $_ -cne 'VR: recentered' -and
         $_ -cne 'VR: default controller bindings set' -and $_ -cnotmatch '^VR: where ' -and
         -not ($sc.Weapon -and $_ -ceq 'VR: saved 1 weapon offsets to vr_weapons.cfg') -and
+        -not ($sc.Weapon -and $_ -cmatch '^VR: haptic [01] (?:0(?:\.\d+)?|1) 0\.(?:04|12)$') -and
         $_ -cnotmatch '^VR: calibration done: ' -and -not ($sc.Weapon -and $_ -cmatch '^VR: (?:last )?fire muzzle -?\d+\.\d{3} -?\d+\.\d{3} -?\d+\.\d{3} body -?\d+\.\d{3} -?\d+\.\d{3} -?\d+\.\d{3} proj -?\d+\.\d{3} -?\d+\.\d{3} -?\d+\.\d{3}$') })
     if ($bad.Count) { return "log has VR error line(s): $($bad -join ' | ')" }
     return $null

@@ -179,6 +179,7 @@ static void CL_ParseStartSoundPacket(void)
 		pos[i] = MSG_ReadCoord ();
 
 	S_StartSound (ent, channel, cl.sound_precache[sound_num], pos, volume/255.0, attenuation);
+	VRG_OnSound (ent, channel); /* HXVR */
 }
 
 /*

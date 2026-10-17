@@ -88,8 +88,12 @@ extern cvar_t vr_viewmodel;
 qboolean VRG_ViewModelPose (entity_t *e);
 float VRG_ViewModelScale (void); /* exact float scale about the model origin */
 extern cvar_t vr_debug_fire;
+void VRG_OnSound (int ent, int channel);
+void VRG_OnDamage (float count);
+qboolean VRG_HapticsEnabled (void);
+void VRG_OnWeaponFire (void);
 void VRG_ServerFireBegin (void);
-void VRG_ServerFireEnd (edict_t *player, const float muzzle[3], const float body[3]);
+void VRG_ServerFireEnd (edict_t *player, const float muzzle[3], const float body[3], qboolean wrapped);
 void VRG_FireInfo_f (void);
 
 /* Implemented by the video driver (gl_vidnt.c): blocks sound while the window is unfocused, except

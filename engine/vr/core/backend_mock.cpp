@@ -32,6 +32,7 @@ public:
 		size_ = glm::ivec2(scaled(kBaseEyeW, p.renderScale), scaled(kBaseEyeH, p.renderScale));
 		paced_ = false;
 		resetHands();
+		for (auto& pulse : haptics_) pulse = glm::vec2(0.0f);
 		offFrom_ = offTarget_ = glm::vec3(0.0f);
 		offStart_ = offDur_ = 0.0;
 		haveNow_ = offPendingStart_ = false;
@@ -68,6 +69,15 @@ public:
 	}
 
 	HandState hand(int i) const override { return hands_[i == 0 ? 0 : 1]; }
+	void haptic(int hand, float amplitude, float seconds) override {
+		if (hand >= 0 && hand < 2) haptics_[hand] = glm::vec2(amplitude, seconds);
+	}
+	void mockLastHaptic(int hand, float& amplitude, float& seconds) const override {
+		amplitude = seconds = 0.0f;
+		if (hand < 0 || hand >= 2) return;
+		amplitude = haptics_[hand].x;
+		seconds = haptics_[hand].y;
+	}
 	void mockSetHand(int i, const HandState& s) override { hands_[i == 0 ? 0 : 1] = s; }
 	void mockSetHeadOffset(glm::vec3 target, float seconds) override {
 		offFrom_ = headOffset(lastNow_);   // continue from where the head is now
@@ -155,6 +165,7 @@ private:
 	Pose eyes_[2] = {head_, head_};
 	bool paced_ = false;
 	HandState hands_[2];
+	glm::vec2 haptics_[2] = {};
 	// Head offset animation (mockSetHeadOffset), on the beginFrame clock.
 	glm::vec3 offFrom_{0.0f}, offTarget_{0.0f};
 	double offStart_ = 0.0, offDur_ = 0.0, lastNow_ = 0.0;

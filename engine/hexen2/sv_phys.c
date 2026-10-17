@@ -1770,7 +1770,6 @@ static qboolean SV_HXVR_CompatBegin (edict_t *ent, client_t *client, vec3_t real
 	VR_CompatOrigin (sv_hxvr_muzzle, ofs->vector, ent->v.origin);
 	VectorCopy (client->hxvr_aim, ent->v.v_angle);
 	AngleVectors (ent->v.v_angle, *sv_globals.v_forward, *sv_globals.v_right, *sv_globals.v_up);
-	VRG_ServerFireBegin ();
 	return true;
 }
 
@@ -1778,7 +1777,6 @@ static void SV_HXVR_CompatEnd (edict_t *ent, const vec3_t real, const vec3_t swa
 {
 	qboolean moved;
 	moved = !VectorCompare (ent->v.origin, swapped);
-	VRG_ServerFireEnd (ent, sv_hxvr_muzzle, real);
 	if (ent->free)
 		return;
 	VR_CompatRestore (real, swapped, ent->v.origin, ent->v.origin);
@@ -1791,9 +1789,12 @@ static qboolean SV_HXVR_RunThink (edict_t *ent, client_t *client)
 {
 	vec3_t real, swapped;
 	qboolean wrapped, result;
+	VectorCopy (ent->v.origin, real);
 	wrapped = SV_HXVR_CompatBegin (ent, client, real);
 	VectorCopy (ent->v.origin, swapped);
+	VRG_ServerFireBegin ();
 	result = SV_RunThink (ent);
+	VRG_ServerFireEnd (ent, sv_hxvr_muzzle, real, wrapped);
 	if (wrapped)
 		SV_HXVR_CompatEnd (ent, real, swapped);
 	return result;
@@ -1879,9 +1880,12 @@ static void SV_Physics_Client (edict_t *ent, int num)
 	*sv_globals.time = sv.time;
 	*sv_globals.self = EDICT_TO_PROG(ent);
 	/* HXVR */
+	VectorCopy (ent->v.origin, real);
 	wrapped = SV_HXVR_CompatBegin (ent, &svs.clients[num-1], real);
 	VectorCopy (ent->v.origin, swapped);
+	VRG_ServerFireBegin ();
 	PR_ExecuteProgram (*sv_globals.PlayerPostThink);
+	VRG_ServerFireEnd (ent, sv_hxvr_muzzle, real, wrapped);
 	if (wrapped)
 		SV_HXVR_CompatEnd (ent, real, swapped);
 	/* HXVR */

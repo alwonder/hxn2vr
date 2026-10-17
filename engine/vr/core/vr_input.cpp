@@ -70,6 +70,21 @@ void inputUpdate(const Backend& backend) {
 
 extern "C" {
 
+void VR_Haptic(int hand, float amplitude, float seconds) {
+	hxvr::Backend* b = hxvr::activeBackend();
+	if (!b || !valid_hand(hand) || !std::isfinite(amplitude) || !std::isfinite(seconds) ||
+	    !(amplitude > 0.0f) || !(seconds > 0.0f)) return;
+	b->haptic(hand, std::fmin(amplitude, 1.0f), std::fmin(seconds, 0.5f));
+}
+
+void VR_MockLastHaptic(int hand, float* amplitude, float* seconds) {
+	float a = 0.0f, s = 0.0f;
+	hxvr::Backend* b = hxvr::activeBackend();
+	if (b && valid_hand(hand)) b->mockLastHaptic(hand, a, s);
+	if (amplitude) *amplitude = a;
+	if (seconds) *seconds = s;
+}
+
 void VR_GetHand(int hand, vr_hand_t* out) {
 	if (!out) return;
 	*out = (hxvr::activeBackend() && valid_hand(hand)) ? g_hands[hand] : vr_hand_t{};

@@ -340,6 +340,7 @@ void V_ParseDamage (void)
 	count = blood*0.5 + armor*0.5;
 	if (count < 10)
 		count = 10;
+	VRG_OnDamage (count); /* HXVR */
 
 	cl.faceanimtime = cl.time + 0.2;	// put sbar face into pain frame
 

@@ -61,6 +61,15 @@ TEST_CASE("every profile binds poses, trigger and a menu") {
 	}
 }
 
+TEST_CASE("every profile binds haptic output on both hands") {
+	REQUIRE(suggestedBindings().size() == 5);
+	for (const ProfileBindings& p : suggestedBindings()) {
+		CAPTURE(std::string(p.profile));
+		CHECK(has(p, Act::Haptic, "/user/hand/left/output/haptic"));
+		CHECK(has(p, Act::Haptic, "/user/hand/right/output/haptic"));
+	}
+}
+
 TEST_CASE("binding paths are well formed and unique") {
 	for (const ProfileBindings& p : suggestedBindings()) {
 		CAPTURE(std::string(p.profile));
@@ -70,9 +79,11 @@ TEST_CASE("binding paths are well formed and unique") {
 		for (const Binding& b : p.bindings) {
 			REQUIRE(b.path != nullptr);
 			CAPTURE(std::string(b.path));
-			const bool left = startsWith(b.path, kLeft), right = startsWith(b.path, kRight);
+			const char* leftPrefix = b.act == Act::Haptic ? "/user/hand/left/output/" : kLeft;
+			const char* rightPrefix = b.act == Act::Haptic ? "/user/hand/right/output/" : kRight;
+			const bool left = startsWith(b.path, leftPrefix), right = startsWith(b.path, rightPrefix);
 			CHECK((left || right));
-			const std::size_t prefix = std::strlen(left ? kLeft : kRight);
+			const std::size_t prefix = std::strlen(left ? leftPrefix : rightPrefix);
 			CHECK(std::strlen(b.path) > prefix);              // a component follows the hand
 			CHECK(b.path[std::strlen(b.path) - 1] != '/');   // no trailing slash
 			CHECK(std::strchr(b.path, ' ') == nullptr);
@@ -131,7 +142,7 @@ TEST_CASE("vive uses the trackpad as the stick, simple has only select and menu"
 
 	const ProfileBindings* simple = find("/interaction_profiles/khr/simple_controller");
 	REQUIRE(simple);
-	CHECK(simple->bindings.size() == 8);   // per hand: grip, aim, select, menu
+	CHECK(simple->bindings.size() == 10);   // per hand: grip, aim, select, menu, haptic
 	for (const char* hand : {kLeft, kRight}) {
 		CHECK(has(*simple, Act::Trigger, std::string(hand) + "select/click"));
 		CHECK(has(*simple, Act::Menu, std::string(hand) + "menu/click"));

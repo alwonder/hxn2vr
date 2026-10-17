@@ -14,20 +14,20 @@ static qboolean vrg_fire_free[MAX_EDICTS];
 static int vrg_fire_count = -1;
 static char vrg_last_fire[512];
 
-/* Snapshot only when requested: appended slots and previously free slots are new entities.
+/* Snapshot for debug logging or enabled VR haptics: appended slots and previously free slots are new entities.
  * Do this for each progs call, not each tick: an existing missile must not count again. */
 void VRG_ServerFireBegin (void)
 {
 	int i;
 	vrg_fire_count = -1;
-	if (!vr_debug_fire.value)
+	if (!vr_debug_fire.value && !VRG_HapticsEnabled ())
 		return;
 	vrg_fire_count = sv.num_edicts;
 	for (i = 0; i < vrg_fire_count; i++)
 		vrg_fire_free[i] = EDICT_NUM(i)->free;
 }
 
-void VRG_ServerFireEnd (edict_t *player, const float muzzle[3], const float body[3])
+void VRG_ServerFireEnd (edict_t *player, const float muzzle[3], const float body[3], qboolean wrapped)
 {
 	int i;
 	edict_t *e;
@@ -39,10 +39,16 @@ void VRG_ServerFireEnd (edict_t *player, const float muzzle[3], const float body
 		if ((i >= vrg_fire_count || vrg_fire_free[i]) && !e->free &&
 		    e->v.owner == EDICT_TO_PROG(player))
 		{
-			q_snprintf (vrg_last_fire, sizeof(vrg_last_fire), "fire muzzle %.3f %.3f %.3f body %.3f %.3f %.3f proj %.3f %.3f %.3f\n",
-				muzzle[0], muzzle[1], muzzle[2], body[0], body[1], body[2],
-				e->v.origin[0], e->v.origin[1], e->v.origin[2]);
-			Con_SafePrintf ("VR: %s", vrg_last_fire);
+			if (wrapped && vr_debug_fire.value)
+			{
+				q_snprintf (vrg_last_fire, sizeof(vrg_last_fire), "fire muzzle %.3f %.3f %.3f body %.3f %.3f %.3f proj %.3f %.3f %.3f\n",
+					muzzle[0], muzzle[1], muzzle[2], body[0], body[1], body[2],
+					e->v.origin[0], e->v.origin[1], e->v.origin[2]);
+				Con_SafePrintf ("VR: %s", vrg_last_fire);
+			}
+			/* Only the viewed local player drives this process's controllers. */
+			if (NUM_FOR_EDICT(player) == cl.viewentity)
+				VRG_OnWeaponFire ();
 			break;
 		}
 	}

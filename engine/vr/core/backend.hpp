@@ -83,6 +83,10 @@ public:
 	// Controllers (hand: 0 = left, 1 = right). hand() is the state of the last beginFrame; a backend
 	// without controllers reports an inactive hand.
 	virtual HandState hand(int) const { return {}; }
+	virtual void haptic(int /*hand*/, float /*amplitude*/, float /*seconds*/) {}
+	virtual void mockLastHaptic(int /*hand*/, float& amplitude, float& seconds) const {
+		amplitude = seconds = 0.0f;
+	}
 	// Mock only (default: ignored). mockSetHand replaces a hand's raw state; mockSetHeadOffset moves
 	// the head offset linearly to `target` over `seconds` of the beginFrame clock (0 = at once), starting
 	// at the `now` of the last beginFrame.

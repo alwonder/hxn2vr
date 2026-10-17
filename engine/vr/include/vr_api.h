@@ -90,6 +90,11 @@ typedef struct {
 } vr_hand_t;
 /* State of the last VR_BeginFrame; all zero when not running or when the hand is inactive. */
 void VR_GetHand(int hand, vr_hand_t *out);
+/* amplitude 0..1 (clamped, * vr_haptics_strength is applied by the glue), seconds > 0 (clamped to 0.5).
+ * Non-finite values, non-positive amplitude/duration, invalid hand or stopped VR: no pulse. */
+void VR_Haptic(int hand, float amplitude, float seconds);
+/* mock only: the last pulse per hand (amplitude, seconds); zero when none / not mock */
+void VR_MockLastHaptic(int hand, float *amplitude, float *seconds);
 /* Mock backend only (ignored by OpenXR): replaces a hand's raw state (buttons: only LOWER/UPPER/STICK/MENU
  * are taken; TRIGGER/GRIP come from trigger/squeeze) / moves the head offset linearly to `target` over
  * `seconds` (0 = at once) of host time. The move starts at the host time of the last VR_BeginFrame. */

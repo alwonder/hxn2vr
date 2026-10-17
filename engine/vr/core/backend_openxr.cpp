@@ -64,6 +64,7 @@ constexpr ActionDesc kActions[kActCount] = {
 	{"lower", "Lower button", XR_ACTION_TYPE_BOOLEAN_INPUT},
 	{"upper", "Upper button", XR_ACTION_TYPE_BOOLEAN_INPUT},
 	{"menu", "Menu", XR_ACTION_TYPE_BOOLEAN_INPUT},
+	{"haptic", "Haptic", XR_ACTION_TYPE_VIBRATION_OUTPUT},
 };
 constexpr const char* kHandPaths[2] = {"/user/hand/left", "/user/hand/right"};
 constexpr const char* kHandNames[2] = {"left", "right"};
@@ -222,6 +223,20 @@ public:
 	Fov eyeFov(int eye) const override { return fov_[eye == 0 ? 0 : 1]; }
 	glm::ivec2 eyeSize() const override { return size_; }
 	HandState hand(int h) const override { return hands_[h == 0 ? 0 : 1]; }
+	void haptic(int hand, float amplitude, float seconds) override {
+		if (hand < 0 || hand >= 2 || lost_ || stopping_ || !running_ || !inputReady_ ||
+		    sess_ == XR_NULL_HANDLE || state_ != XR_SESSION_STATE_FOCUSED || !contextOk()) return;
+		XrHapticActionInfo hi{XR_TYPE_HAPTIC_ACTION_INFO};
+		hi.action = actions_[actIndex(Act::Haptic)];
+		hi.subactionPath = handPath_[hand];
+		XrHapticVibration pulse{XR_TYPE_HAPTIC_VIBRATION};
+		pulse.amplitude = amplitude;
+		pulse.frequency = XR_FREQUENCY_UNSPECIFIED;
+		pulse.duration = static_cast<XrDuration>(static_cast<double>(seconds) * 1000000000.0);
+		inputOk(callInput("xrApplyHapticFeedback", [&] {
+			return xrApplyHapticFeedback(sess_, &hi, reinterpret_cast<const XrHapticBaseHeader*>(&pulse));
+		}, !inputWarned_));
+	}
 
 	BackendInfo info() const override {
 		std::string state = lost_ ? "lost" : stateName(state_);

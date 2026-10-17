@@ -14,6 +14,10 @@ cvar_t vr_gunangle = {"vr_gunangle", "0", CVAR_ARCHIVE};
 cvar_t vr_viewmodel = {"vr_viewmodel", "1", CVAR_ARCHIVE};
 static cvar_t vr_aimdot = {"vr_aimdot", "1", CVAR_ARCHIVE};
 static cvar_t vr_offhand_marker = {"vr_offhand_marker", "1", CVAR_ARCHIVE};
+static cvar_t vr_haptics = {"vr_haptics", "1", CVAR_ARCHIVE};
+static cvar_t vr_haptics_strength = {"vr_haptics_strength", "1.0", CVAR_ARCHIVE};
+/* Hexen II progs sound channel: CHAN_WEAPON = 1 (no shared engine C constant). */
+#define VRG_CHAN_WEAPON 1
 static qboolean vrg_marker_valid, vrg_dot_valid;
 static vec3_t vrg_marker_org, vrg_dot_org;
 static float vrg_dot_size;
@@ -22,8 +26,57 @@ static qboolean vrg_tuning, vrg_grabbed, vrg_grip_down;
 static int vrg_tune_hand;
 static qmodel_t *vrg_tune_model;
 static vr_weapon_entry_t vrg_tune_entry, vrg_grab_relative;
+static double vrg_last_weapon_pulse = -1;
 
 qboolean VRG_WeaponTuning (void) { return vrg_tuning && VR_IsRunning (); }
+
+qboolean VRG_HapticsEnabled (void)
+{
+	return VR_IsRunning () && vr_haptics.integer;
+}
+
+static void VRG_Haptic (int hand, float amplitude, float seconds)
+{
+	float strength;
+
+	if (!VR_IsRunning () || !vr_haptics.integer) return;
+	strength = vr_haptics_strength.value;
+	if (!(strength > 0)) return; /* Also rejects NaN. */
+	if (strength > 1) strength = 1;
+	amplitude *= strength;
+	VR_Haptic (hand, amplitude, seconds);
+	if (vr_debug_fire.value)
+		Con_SafePrintf ("VR: haptic %d %g %g\n", hand, amplitude, seconds);
+}
+
+/* Sound packets and local-server spawns share one monotonic host clock/debounce.
+ * Damage pulses are independent of the weapon debounce. */
+void VRG_OnWeaponFire (void)
+{
+	if (!VRG_HapticsEnabled () || !(vr_haptics_strength.value > 0)) return;
+	if (realtime >= vrg_last_weapon_pulse && realtime - vrg_last_weapon_pulse < 0.05)
+		return;
+	vrg_last_weapon_pulse = realtime;
+	VRG_Haptic (VRG_MainHand (), 0.6f, 0.04f);
+}
+
+void VRG_OnSound (int ent, int channel)
+{
+	if (ent == cl.viewentity && channel == VRG_CHAN_WEAPON)
+		VRG_OnWeaponFire ();
+}
+
+void VRG_OnDamage (float count)
+{
+	float amplitude;
+
+	if (!(count >= 0)) return;
+	amplitude = count / 40.0f;
+	if (amplitude < 0.3f) amplitude = 0.3f;
+	if (amplitude > 1) amplitude = 1;
+	VRG_Haptic (VR_HAND_LEFT, amplitude, 0.12f);
+	VRG_Haptic (VR_HAND_RIGHT, amplitude, 0.12f);
+}
 
 void VRG_WeaponTuneReset (void)
 {
@@ -125,6 +178,8 @@ void VRG_WeaponInit (void)
 	Cvar_RegisterVariable (&vr_viewmodel);
 	Cvar_RegisterVariable (&vr_aimdot);
 	Cvar_RegisterVariable (&vr_offhand_marker);
+	Cvar_RegisterVariable (&vr_haptics);
+	Cvar_RegisterVariable (&vr_haptics_strength);
 	Cmd_AddCommand ("vr_weapon_offset", VRG_WeaponOffset_f);
 	Cmd_AddCommand ("vr_weapon_list", VRG_WeaponList_f);
 	Cmd_AddCommand ("vr_weapon_tune", VRG_WeaponTune_f);

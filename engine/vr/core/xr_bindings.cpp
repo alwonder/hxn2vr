@@ -10,6 +10,7 @@ const std::vector<ProfileBindings>& suggestedBindings() {
 	static const std::vector<ProfileBindings> table = {
 		{"/interaction_profiles/oculus/touch_controller",
 		 {
+			 {Act::Haptic, "/user/hand/left/output/haptic"}, {Act::Haptic, "/user/hand/right/output/haptic"},
 			 {Act::GripPose, HXVR_L "grip/pose"},          {Act::GripPose, HXVR_R "grip/pose"},
 			 {Act::AimPose, HXVR_L "aim/pose"},            {Act::AimPose, HXVR_R "aim/pose"},
 			 {Act::Trigger, HXVR_L "trigger/value"},       {Act::Trigger, HXVR_R "trigger/value"},
@@ -22,6 +23,7 @@ const std::vector<ProfileBindings>& suggestedBindings() {
 		 }},
 		{"/interaction_profiles/valve/index_controller",
 		 {
+			 {Act::Haptic, "/user/hand/left/output/haptic"}, {Act::Haptic, "/user/hand/right/output/haptic"},
 			 {Act::GripPose, HXVR_L "grip/pose"},          {Act::GripPose, HXVR_R "grip/pose"},
 			 {Act::AimPose, HXVR_L "aim/pose"},            {Act::AimPose, HXVR_R "aim/pose"},
 			 {Act::Trigger, HXVR_L "trigger/value"},       {Act::Trigger, HXVR_R "trigger/value"},
@@ -34,6 +36,7 @@ const std::vector<ProfileBindings>& suggestedBindings() {
 		 }},
 		{"/interaction_profiles/htc/vive_controller",
 		 {
+			 {Act::Haptic, "/user/hand/left/output/haptic"}, {Act::Haptic, "/user/hand/right/output/haptic"},
 			 {Act::GripPose, HXVR_L "grip/pose"},        {Act::GripPose, HXVR_R "grip/pose"},
 			 {Act::AimPose, HXVR_L "aim/pose"},          {Act::AimPose, HXVR_R "aim/pose"},
 			 {Act::Trigger, HXVR_L "trigger/value"},     {Act::Trigger, HXVR_R "trigger/value"},
@@ -44,6 +47,7 @@ const std::vector<ProfileBindings>& suggestedBindings() {
 		 }},
 		{"/interaction_profiles/microsoft/motion_controller",
 		 {
+			 {Act::Haptic, "/user/hand/left/output/haptic"}, {Act::Haptic, "/user/hand/right/output/haptic"},
 			 {Act::GripPose, HXVR_L "grip/pose"},          {Act::GripPose, HXVR_R "grip/pose"},
 			 {Act::AimPose, HXVR_L "aim/pose"},            {Act::AimPose, HXVR_R "aim/pose"},
 			 {Act::Trigger, HXVR_L "trigger/value"},       {Act::Trigger, HXVR_R "trigger/value"},
@@ -54,6 +58,7 @@ const std::vector<ProfileBindings>& suggestedBindings() {
 		 }},
 		{"/interaction_profiles/khr/simple_controller",
 		 {
+			 {Act::Haptic, "/user/hand/left/output/haptic"}, {Act::Haptic, "/user/hand/right/output/haptic"},
 			 {Act::GripPose, HXVR_L "grip/pose"},    {Act::GripPose, HXVR_R "grip/pose"},
 			 {Act::AimPose, HXVR_L "aim/pose"},      {Act::AimPose, HXVR_R "aim/pose"},
 			 {Act::Trigger, HXVR_L "select/click"},  {Act::Trigger, HXVR_R "select/click"},

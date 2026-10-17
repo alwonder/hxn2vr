@@ -61,6 +61,58 @@ vr_hand_t hand_with(float trigger, float squeeze, unsigned buttons = 0) {
 
 }  // namespace
 
+TEST_CASE("haptic pulse reaches the mock") {
+	Session s;
+	REQUIRE(s.started);
+	s.frame();
+	VR_Haptic(VR_HAND_RIGHT, 0.6f, 0.04f);
+	float amplitude = -1.0f, seconds = -1.0f;
+	VR_MockLastHaptic(VR_HAND_RIGHT, &amplitude, &seconds);
+	CHECK(amplitude == doctest::Approx(0.6f));
+	CHECK(seconds == doctest::Approx(0.04f));
+	VR_MockLastHaptic(VR_HAND_LEFT, &amplitude, &seconds);
+	CHECK(amplitude == 0.0f);
+	CHECK(seconds == 0.0f);
+}
+
+TEST_CASE("haptic values are clamped") {
+	Session s;
+	REQUIRE(s.started);
+	s.frame();
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	float amplitude = -1.0f, seconds = -1.0f;
+	SUBCASE("amplitude above one") {
+		VR_Haptic(VR_HAND_RIGHT, 2.0f, 0.04f);
+		VR_MockLastHaptic(VR_HAND_RIGHT, &amplitude, &seconds);
+		CHECK(amplitude == doctest::Approx(1.0f));
+		CHECK(seconds == doctest::Approx(0.04f));
+	}
+	SUBCASE("duration above half a second") {
+		VR_Haptic(VR_HAND_RIGHT, 0.6f, 3.0f);
+		VR_MockLastHaptic(VR_HAND_RIGHT, &amplitude, &seconds);
+		CHECK(amplitude == doctest::Approx(0.6f));
+		CHECK(seconds == doctest::Approx(0.5f));
+	}
+	SUBCASE("negative amplitude produces no pulse") {
+		VR_Haptic(VR_HAND_RIGHT, -1.0f, 0.04f);
+		VR_MockLastHaptic(VR_HAND_RIGHT, &amplitude, &seconds);
+		CHECK(amplitude == 0.0f);
+		CHECK(seconds == 0.0f);
+	}
+	SUBCASE("NaN amplitude produces no pulse") {
+		VR_Haptic(VR_HAND_RIGHT, nan, 0.04f);
+		VR_MockLastHaptic(VR_HAND_RIGHT, &amplitude, &seconds);
+		CHECK(amplitude == 0.0f);
+		CHECK(seconds == 0.0f);
+	}
+	SUBCASE("NaN duration produces no pulse") {
+		VR_Haptic(VR_HAND_RIGHT, 0.6f, nan);
+		VR_MockLastHaptic(VR_HAND_RIGHT, &amplitude, &seconds);
+		CHECK(amplitude == 0.0f);
+		CHECK(seconds == 0.0f);
+	}
+}
+
 TEST_CASE("mock hands have default poses") {
 	Session s;
 	REQUIRE(s.started);
