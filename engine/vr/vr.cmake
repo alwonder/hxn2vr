@@ -27,6 +27,7 @@ add_library(hxvr STATIC
     ${HXVR_DIR}/core/vr_comfort.cpp
     ${HXVR_DIR}/core/vr_netblock.cpp
     ${HXVR_DIR}/core/vr_compat.cpp
+    ${HXVR_DIR}/core/vr_weapons.cpp
     ${HXVR_DIR}/core/backend_mock.cpp
     ${HXVR_DIR}/core/gl_ext.cpp
     ${HXVR_DIR}/core/targets.cpp
@@ -65,6 +66,7 @@ add_executable(vr_tests
     ${CMAKE_SOURCE_DIR}/tests/vr/test_room.cpp
     ${CMAKE_SOURCE_DIR}/tests/vr/test_netblock.cpp
     ${CMAKE_SOURCE_DIR}/tests/vr/test_compat.cpp
+    ${CMAKE_SOURCE_DIR}/tests/vr/test_weapons.cpp
     ${CMAKE_SOURCE_DIR}/tests/vr/test_comfort.cpp
 )
 target_compile_features(vr_tests PRIVATE cxx_std_20)

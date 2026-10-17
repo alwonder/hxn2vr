@@ -283,6 +283,8 @@ static void VRG_Start (void)
 	VID_VRSoundFocus ();	/* sound plays while VR runs, also with the desktop window unfocused */
 	Con_Printf ("VR: started (%s)\n", bname);
 	VRG_InputStart ();	/* button state, mock hands; may set (and announce) the default bindings */
+	if (Sys_FileType (FS_MakePath (FS_USERDIR, NULL, "vr_weapons.cfg")) & FS_ENT_FILE)
+		Cbuf_AddText ("exec vr_weapons.cfg\n");
 }
 
 static void VRG_Stop (void)

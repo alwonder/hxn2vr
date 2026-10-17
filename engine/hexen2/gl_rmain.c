@@ -814,6 +814,18 @@ static void R_DrawAliasModel (entity_t *e)
 	glPushMatrix_fp ();
 	R_RotateForEntity2(e);
 
+	/* HXVR: exact entry scale, about the model origin rather than packed-vertex centre. */
+	if (e == &cl.viewent && VRG_Active ())
+	{
+		entScale = VRG_ViewModelScale ();
+		tmatrix[0][0] = paliashdr->scale[0] * entScale;
+		tmatrix[1][1] = paliashdr->scale[1] * entScale;
+		tmatrix[2][2] = paliashdr->scale[2] * entScale;
+		tmatrix[0][3] = paliashdr->scale_origin[0] * entScale;
+		tmatrix[1][3] = paliashdr->scale_origin[1] * entScale;
+		tmatrix[2][3] = paliashdr->scale_origin[2] * entScale;
+	}
+	else /* HXVR */
 	if (e->scale != 0 && e->scale != 100)
 	{
 		entScale = (float)e->scale / 100.0f;
@@ -876,7 +888,7 @@ static void R_DrawAliasModel (entity_t *e)
 		tmatrix[2][3] += sin(e->origin[0] + e->origin[1] + (cl.time*3)) * 5.5;
 	}
 
-	if (e == &cl.viewent && scr_fov.integer > 90) /* compensate viewmodel distortion at fov>90 */
+	if (e == &cl.viewent && scr_fov.integer > 90 && !VRG_Active ()) /* HXVR: no FOV distortion in VR */
 	{
 		float fovscale = tan(scr_fov.value * (0.5 * M_PI / 180));
 		glTranslatef_fp (tmatrix[0][3], tmatrix[1][3] * fovscale, tmatrix[2][3] * fovscale);	// paliashdr->scale_origin[0..2]
@@ -1361,21 +1373,25 @@ static void R_DrawViewModel (void)
 {
 	int			lnum;
 	vec3_t		dist;
+	vec3_t		lightorg; /* HXVR: stable eye lighting even if the model is hidden */
 	float		add;
 	dlight_t	*dl;
 	entity_t	*e;
 
-	if (VRG_Active ())	/* HXVR: no view model in VR (hand-held weapon comes in stage 3) */
-		return;
-
 	e = &cl.viewent;
 
-	if (!e->model)
+	if (!e->model && !VRG_Active ()) /* HXVR: VR still reports light when no model is present */
 		return;
+
+	/* HXVR: pose is placed after lighting; do not sample a previous eye's weapon origin. */
+	if (VRG_Active ())
+		VectorCopy (r_refdef.vieworg, lightorg);
+	else
+		VectorCopy (e->origin, lightorg);
 
 	if (gl_lightmap_format == GL_RGBA)
 	{
-		ambientlight = R_LightPointColor (e->origin);
+		ambientlight = R_LightPointColor (lightorg); /* HXVR */
 		if (lightcolor[0] < 24)
 			lightcolor[0] = 24;
 		if (lightcolor[1] < 24)
@@ -1387,7 +1403,7 @@ static void R_DrawViewModel (void)
 	}
 	else
 	{
-		ambientlight = shadelight = R_LightPoint (e->origin);
+		ambientlight = shadelight = R_LightPoint (lightorg); /* HXVR */
 		if (ambientlight < 24)
 			ambientlight = shadelight = 24;	// always give some light on gun
 	}
@@ -1401,7 +1417,7 @@ static void R_DrawViewModel (void)
 		if (dl->die < cl.time)
 			continue;
 
-		VectorSubtract (e->origin, dl->origin, dist);
+		VectorSubtract (lightorg, dl->origin, dist); /* HXVR */
 		add = dl->radius - VectorLengthFast(dist);
 		if (add > 0)
 		{
@@ -1422,6 +1438,10 @@ static void R_DrawViewModel (void)
 
 	cl.light_level = ambientlight;
 
+	/* HXVR: evaluate hiding after lighting, including vr_viewmodel 0 and invalid tracking. */
+	if (VRG_Active () && !VRG_ViewModelPose (e))
+		return;
+
 	if ((cl.v.health <= 0) ||
 	    (chase_active.integer) ||
 //rjr	    (cl.items & IT_INVISIBILITY) ||
@@ -1432,11 +1452,13 @@ static void R_DrawViewModel (void)
 	}
 
 	// hack the depth range to prevent view model from poking into walls
-	glDepthRange_fp (gldepthmin, gldepthmin + 0.3*(gldepthmax-gldepthmin));
+	if (!VRG_Active ()) /* HXVR: world depth for the hand-held weapon */
+		glDepthRange_fp (gldepthmin, gldepthmin + 0.3*(gldepthmax-gldepthmin));
 	AlwaysDrawModel = true;
 	R_DrawAliasModel (e);
 	AlwaysDrawModel = false;
-	glDepthRange_fp (gldepthmin, gldepthmax);
+	if (!VRG_Active ()) /* HXVR */
+		glDepthRange_fp (gldepthmin, gldepthmax);
 }
 
 //=============================================================================

@@ -1348,7 +1348,7 @@ static void SCR_Draw2D (qboolean vr_panel)
 #endif	/* H2W */
 	else
 	{
-		if (crosshair.integer && !cls.demoplayback)
+		if (crosshair.integer && !cls.demoplayback && !VRG_Active ()) /* HXVR */
 			Draw_Crosshair();
 
 		SCR_DrawRam();

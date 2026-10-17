@@ -84,6 +84,9 @@ qboolean VRG_CrouchHeld (void);
  * (vr_glue_server.c; sv_phys.c applies the sum on the next physics tick). */
 void VRG_ServerReadMoveBlock (client_t *cl);
 extern cvar_t vr_compat;
+extern cvar_t vr_viewmodel;
+qboolean VRG_ViewModelPose (entity_t *e);
+float VRG_ViewModelScale (void); /* exact float scale about the model origin */
 extern cvar_t vr_debug_fire;
 void VRG_ServerFireBegin (void);
 void VRG_ServerFireEnd (edict_t *player, const float muzzle[3], const float body[3]);
