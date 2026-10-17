@@ -77,7 +77,7 @@ int VR_MuzzleOffsetOk(const float muzzle[3]) {
 	if (!muzzle || !std::isfinite(muzzle[0]) || !std::isfinite(muzzle[1]) ||
 	    !std::isfinite(muzzle[2])) return 0;
 	const double x = muzzle[0], y = muzzle[1], z = muzzle[2];
-	return x * x + y * y + z * z <= 96.0 * 96.0 ? 1 : 0;
+	return x * x + y * y + z * z <= 160.0 * 160.0 ? 1 : 0;
 }
 
 int VR_RoomscaleMoveOk(const float move[2]) {

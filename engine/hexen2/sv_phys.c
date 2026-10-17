@@ -1714,15 +1714,14 @@ Player character actions
 ================
 */
 /* HXVR: only progs sees the temporary origin; collision keeps the body's linked bounds. */
-/* These snapshots pass Begin -> End. Wrapped progs calls never nest. */
+/* HXVR: snapshots pass Begin -> End. Wrapped progs calls never nest. */
 static vec3_t sv_hxvr_muzzle, sv_hxvr_absmin, sv_hxvr_absmax;
+static vec3_t sv_hxvr_real_ofs, sv_hxvr_swapped_ofs;
 static qboolean SV_HXVR_CompatBegin (edict_t *ent, client_t *client, vec3_t real)
 {
 	eval_t *ofs, *view;
-	vec3_t start, muzzle, forward, right, up, end, hit;
-	trace_t trace;
-	int camera, blocked;
-	const float clearance = 16;
+	vec3_t start, muzzle, split_origin;
+	int camera;
 
 	if (!vr_enabled.value || !vr_compat.value || !client->spawned || !client->hxvr_weapon)
 		return false;
@@ -1740,34 +1739,13 @@ static qboolean SV_HXVR_CompatBegin (edict_t *ent, client_t *client, vec3_t real
 	VectorCopy (ent->v.origin, real);
 	VectorAdd (real, ent->v.view_ofs, start);
 	VectorAdd (real, client->hxvr_muzzle, muzzle);
-	AngleVectors (client->hxvr_aim, forward, right, up);
-	trace = SV_Move (start, vec3_origin, vec3_origin, muzzle, MOVE_NOMONSTERS, ent);
-	blocked = trace.startsolid || trace.allsolid || trace.fraction < 1;
-	VectorCopy (trace.endpos, hit);
-	if (trace.startsolid || trace.allsolid)
-		VectorCopy (start, hit);
-	if (!blocked)
-	{
-		/* Stock progs adds up to 16 units along aim when spawning a missile. */
-		VectorMA (muzzle, clearance, forward, end);
-		trace = SV_Move (muzzle, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, ent);
-		blocked = trace.startsolid || trace.allsolid || trace.fraction < 1;
-		VectorCopy (trace.endpos, hit);
-		if (trace.startsolid || trace.allsolid)
-			VectorCopy (muzzle, hit);
-		if (blocked)
-		{
-			/* The pullback follows eye->hit, which may cross a corner before that hit. */
-			trace = SV_Move (start, vec3_origin, vec3_origin, hit, MOVE_NOMONSTERS, ent);
-			VectorCopy (trace.endpos, hit);
-			if (trace.startsolid || trace.allsolid)
-				VectorCopy (start, hit);
-		}
-	}
-	VR_CompatClampMuzzle (start, muzzle, hit, blocked, clearance, sv_hxvr_muzzle);
+	VRG_ClampMuzzle (ent, start, muzzle, client->hxvr_aim, sv_hxvr_muzzle);
 	VectorCopy (ent->v.absmin, sv_hxvr_absmin);
 	VectorCopy (ent->v.absmax, sv_hxvr_absmax);
-	VR_CompatOrigin (sv_hxvr_muzzle, ofs->vector, ent->v.origin);
+	VectorCopy (ofs->vector, sv_hxvr_real_ofs);
+	VR_CompatSplit (real, sv_hxvr_muzzle, sv_hxvr_real_ofs, split_origin, sv_hxvr_swapped_ofs);
+	VectorCopy (split_origin, ent->v.origin);
+	VectorCopy (sv_hxvr_swapped_ofs, ofs->vector);
 	VectorCopy (client->hxvr_aim, ent->v.v_angle);
 	AngleVectors (ent->v.v_angle, *sv_globals.v_forward, *sv_globals.v_right, *sv_globals.v_up);
 	return true;
@@ -1775,11 +1753,15 @@ static qboolean SV_HXVR_CompatBegin (edict_t *ent, client_t *client, vec3_t real
 
 static void SV_HXVR_CompatEnd (edict_t *ent, const vec3_t real, const vec3_t swapped)
 {
+	eval_t *ofs;
 	qboolean moved;
 	moved = !VectorCompare (ent->v.origin, swapped);
 	if (ent->free)
 		return;
 	VR_CompatRestore (real, swapped, ent->v.origin, ent->v.origin);
+	ofs = GetEdictFieldValue (ent, "proj_ofs");
+	if (ofs)
+		VR_CompatRestore (sv_hxvr_real_ofs, sv_hxvr_swapped_ofs, ofs->vector, ofs->vector);
 	if (moved || !VectorCompare (ent->v.absmin, sv_hxvr_absmin) ||
 	    !VectorCompare (ent->v.absmax, sv_hxvr_absmax))
 		SV_LinkEdict (ent, true);
@@ -1881,7 +1863,8 @@ static void SV_Physics_Client (edict_t *ent, int num)
 	*sv_globals.self = EDICT_TO_PROG(ent);
 	/* HXVR */
 	VectorCopy (ent->v.origin, real);
-	wrapped = SV_HXVR_CompatBegin (ent, &svs.clients[num-1], real);
+	/* HXVR: release animations run in th_weapon, W_WeaponFrame attacks on button0. */
+	wrapped = ent->v.button0 && SV_HXVR_CompatBegin (ent, &svs.clients[num-1], real);
 	VectorCopy (ent->v.origin, swapped);
 	VRG_ServerFireBegin ();
 	PR_ExecuteProgram (*sv_globals.PlayerPostThink);

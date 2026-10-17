@@ -32,50 +32,52 @@ qboolean VRG_WeaponTuning (void) { return vrg_tuning && VR_IsRunning (); }
 
 qboolean VRG_HapticsEnabled (void)
 {
-	return VR_IsRunning () && vr_haptics.integer;
+	return VR_IsRunning () && !cls.demoplayback && vr_haptics.integer;
 }
 
-static void VRG_Haptic (int hand, float amplitude, float seconds)
+static void VRG_Haptic (int hand, float amplitude, float seconds, const char *source)
 {
 	float strength;
 
-	if (!VR_IsRunning () || !vr_haptics.integer) return;
+	if (!VRG_HapticsEnabled ()) return;
 	strength = vr_haptics_strength.value;
 	if (!(strength > 0)) return; /* Also rejects NaN. */
 	if (strength > 1) strength = 1;
 	amplitude *= strength;
 	VR_Haptic (hand, amplitude, seconds);
 	if (vr_debug_fire.value)
-		Con_SafePrintf ("VR: haptic %d %g %g\n", hand, amplitude, seconds);
+		Con_SafePrintf ("VR: haptic %d %g %g %s\n", hand, amplitude, seconds, source);
 }
 
 /* Sound packets and local-server spawns share one monotonic host clock/debounce.
  * Damage pulses are independent of the weapon debounce. */
-void VRG_OnWeaponFire (void)
+static void VRG_WeaponPulse (const char *source)
 {
 	if (!VRG_HapticsEnabled () || !(vr_haptics_strength.value > 0)) return;
 	if (realtime >= vrg_last_weapon_pulse && realtime - vrg_last_weapon_pulse < 0.05)
 		return;
 	vrg_last_weapon_pulse = realtime;
-	VRG_Haptic (VRG_MainHand (), 0.6f, 0.04f);
+	VRG_Haptic (VRG_MainHand (), 0.6f, 0.04f, source);
 }
+
+void VRG_OnWeaponFire (void) { VRG_WeaponPulse ("spawn"); }
 
 void VRG_OnSound (int ent, int channel)
 {
-	if (ent == cl.viewentity && channel == VRG_CHAN_WEAPON)
-		VRG_OnWeaponFire ();
+	if (!cls.demoplayback && ent == cl.viewentity && channel == VRG_CHAN_WEAPON)
+		VRG_WeaponPulse ("sound");
 }
 
 void VRG_OnDamage (float count)
 {
 	float amplitude;
 
-	if (!(count >= 0)) return;
+	if (cls.demoplayback || !(count >= 0)) return;
 	amplitude = count / 40.0f;
 	if (amplitude < 0.3f) amplitude = 0.3f;
 	if (amplitude > 1) amplitude = 1;
-	VRG_Haptic (VR_HAND_LEFT, amplitude, 0.12f);
-	VRG_Haptic (VR_HAND_RIGHT, amplitude, 0.12f);
+	VRG_Haptic (VR_HAND_LEFT, amplitude, 0.12f, "damage");
+	VRG_Haptic (VR_HAND_RIGHT, amplitude, 0.12f, "damage");
 }
 
 void VRG_WeaponTuneReset (void)
@@ -252,8 +254,8 @@ void VRG_WeaponTuneFrame (float dt)
 	if (vrg_tune_hand != VRG_MainHand ()) { VRG_WeaponTuneReset (); return; }
 	if (!model || cl.v.health <= 0 ||
 		cl.intermission || cl.v.cameramode || cls.signon != SIGNONS)
-	{ vrg_grabbed = false; vrg_tune_model = NULL; return; }
-	if (vrg_tune_model != model) { vrg_grabbed = false; vrg_grip_down = false; }
+	{ vrg_grabbed = false; vrg_grip_down = true; vrg_tune_model = NULL; return; }
+	if (vrg_tune_model != model) { vrg_grabbed = false; vrg_grip_down = true; }
 	vrg_tune_model = model;
 	VRG_TrackedPoses (&head, NULL, hands);
 	other = &hands[1 - VRG_MainHand ()];
@@ -273,7 +275,7 @@ void VRG_WeaponTuneFrame (float dt)
 		vrg_grabbed = true;
 	}
 	VR_StickDeadzone (other->stick, vr_stick_deadzone.value, stick);
-	scale = vrg_tune_entry.scale * (1 + 0.5f * stick[1] * q_max (dt, 0));
+	scale = vrg_tune_entry.scale * (1 + 0.5f * stick[1] * (dt > 0 ? q_min (dt, 0.1f) : 0));
 	scale = q_min (q_max (scale, 0.25f), 4.0f);
 	if (vrg_grabbed)
 	{
@@ -322,6 +324,9 @@ qboolean VRG_ViewModelPose (entity_t *e)
 	VRG_HandWeaponPose (hand_org, hand_ang, &valid);
 	if (!valid)
 		return false;
+	hand_org[0] += vrg_camera_feet[0] - cl_entities[cl.viewentity].origin[0];
+	hand_org[1] += vrg_camera_feet[1] - cl_entities[cl.viewentity].origin[1];
+	hand_org[2] += vrg_camera_feet[2] - cl_entities[cl.viewentity].origin[2];
 	e->model = model;
 	vrg_viewmodel_scale = VRG_TransformWeapon (model, hand_org, hand_ang,
 			e->origin, e->angles, muzzle, aim);
@@ -339,13 +344,14 @@ void VRG_WeaponIndicatorsFrame (qboolean world)
 	vr_pose_t head;
 	vr_hand_t hands[2], *other;
 	qboolean valid;
-	vec3_t muzzle, angles, forward, right, up, end, delta;
+	vec3_t muzzle, angles, forward, right, up, end, delta, start, clamped;
+	int i;
 	trace_t tr;
 	edict_t *player;
 
 	vrg_marker_valid = vrg_dot_valid = false;
 	if (!VR_IsRunning () || !world || Key_GetDest () != key_game ||
-		cl.intermission || cls.signon != SIGNONS)
+		cl.intermission || cls.signon != SIGNONS || cl.v.cameramode || cl.v.health <= 0)
 		return;
 	if (vr_offhand_marker.integer)
 	{
@@ -354,14 +360,30 @@ void VRG_WeaponIndicatorsFrame (qboolean world)
 		if (other->active && other->pose_valid)
 		{
 			VRG_HandOrigin (&head, &other->grip, vrg_marker_org);
+			for (i = 0; i < 3; i++)
+				vrg_marker_org[i] += vrg_camera_feet[i] - cl_entities[cl.viewentity].origin[i];
 			vrg_marker_valid = true;
 		}
 	}
-	if (!vr_aimdot.integer || !VRG_WeaponModel () || cl.v.health <= 0 || cl.v.cameramode)
+	if (cls.demoplayback || !vr_aimdot.integer || !VRG_WeaponModel () || cl.v.health <= 0 || cl.v.cameramode)
 		return;
 	VRG_WeaponPose (muzzle, angles, &valid);
 	if (!valid) return;
 	AngleVectors (angles, forward, right, up);
+	player = sv.active ? ((cl.viewentity > 0 && cl.viewentity < sv.num_edicts) ?
+		EDICT_NUM(cl.viewentity) : svs.clients[0].edict) : NULL;
+	if (player) {
+		/* The move block carries an offset from client feet, applied at server feet. */
+		for (i = 0; i < 3; i++)
+			muzzle[i] += player->v.origin[i] - cl_entities[cl.viewentity].origin[i];
+		VectorAdd (player->v.origin, player->v.view_ofs, start);
+	}
+	else {
+		VectorCopy (cl_entities[cl.viewentity].origin, start);
+		start[2] += cl.viewheight;
+	}
+	VRG_ClampMuzzle (player, start, muzzle, angles, clamped);
+	VectorCopy (clamped, muzzle);
 	VectorMA (muzzle, 4096.0f, forward, end);
 	if (sv.active)
 	{
@@ -371,6 +393,7 @@ void VRG_WeaponIndicatorsFrame (qboolean world)
 	}
 	else
 		VRG_WorldTrace (muzzle, end, &tr);
+	if (tr.fraction == 1) return;
 	VectorSubtract (tr.endpos, muzzle, delta);
 	vrg_dot_size = VR_AimDotSize ((float)VectorLength (delta));
 	VectorMA (tr.endpos, -1.0f, forward, vrg_dot_org);

@@ -168,13 +168,16 @@ TEST_CASE("move block v2 rejects non-finite weapon values") {
 
 TEST_CASE("muzzle offset sanity") {
 	const float ok[3] = {10.0f, -4.0f, 36.0f};
-	const float big[3] = {70.0f, 70.0f, 10.0f};
+	const float big[3] = {130.0f, 100.0f, 30.0f};
 	const float nan[3] = {std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f};
-	const float edge[3] = {0.0f, 0.0f, 96.0f};   // P3: inclusive 96-unit bound
+	const float edge[3] = {0.0f, 0.0f, 160.0f};   // R5: inclusive 160-unit bound
 	CHECK(VR_MuzzleOffsetOk(ok) == 1);
 	CHECK(VR_MuzzleOffsetOk(big) == 0);
 	CHECK(VR_MuzzleOffsetOk(nan) == 0);
 	CHECK(VR_MuzzleOffsetOk(edge) == 1);
+	const float outside[3] = {0, 0, 160.01f};
+	CHECK(VR_MuzzleOffsetOk(outside) == 0);
+	CHECK(VR_MuzzleOffsetOk(nullptr) == 0);
 }
 
 TEST_CASE("server rejects oversized room-scale moves") {

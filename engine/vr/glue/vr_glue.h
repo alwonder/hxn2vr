@@ -92,9 +92,12 @@ void VRG_OnSound (int ent, int channel);
 void VRG_OnDamage (float count);
 qboolean VRG_HapticsEnabled (void);
 void VRG_OnWeaponFire (void);
+void VRG_ClampMuzzle (edict_t *ent, const float start[3], const float muzzle[3],
+                      const float angles[3], float out[3]);
 void VRG_ServerFireBegin (void);
 void VRG_ServerFireEnd (edict_t *player, const float muzzle[3], const float body[3], qboolean wrapped);
 void VRG_FireInfo_f (void);
+void VRG_MockWall_f (void); /* mock/debug-only smoke placement and restoration */
 
 /* Implemented by the video driver (gl_vidnt.c): blocks sound while the window is unfocused, except
  * while a VR session runs. The glue calls it when VR starts / stops. */

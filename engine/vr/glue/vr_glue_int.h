@@ -65,6 +65,7 @@ void VRG_CalibrateReset (void);		/* VR starts / stops: drops a calibration in pr
  * feet + lean + their offset from the head) and the excess past vr_roomscale_radius that the body should
  * walk (world units): summed over the rendered frames until VRG_WriteMoveBlock sends it to the local
  * server (the block consumes it), dropped whenever the server would not advance the player. */
+extern vec3_t vrg_camera_feet;
 extern vr_room_t	vrg_room;
 extern float		vrg_room_excess[2];
 void VRG_RoomReset (void);		/* lean 0, forget the last head, drop the excess not yet sent */

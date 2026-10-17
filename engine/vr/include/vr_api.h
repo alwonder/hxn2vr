@@ -245,12 +245,16 @@ typedef struct {
  * Read: *out is untouched unless it returns 1. */
 int VR_WriteMoveBlock(const vr_moveblock_t *b, unsigned char *buf, int cap);
 int VR_ReadMoveBlock(const unsigned char *buf, int len, vr_moveblock_t *out);
-/* server sanity: finite, |muzzle| <= 96 world units (0 for NULL) */
+/* server sanity: finite, |muzzle| <= 160 world units (0 for NULL) */
 int VR_MuzzleOffsetOk(const float muzzle[3]);
 /* server sanity: finite, and |accumulated move| <= 64 units (0 for NULL) */
 int VR_RoomscaleMoveOk(const float move[2]);
 
-/* Stock-progs compatibility: origin + proj_ofs must equal the muzzle. */
+/* Stock-progs compatibility: split the muzzle without lowering the body origin.
+ * Keeps real.z and proj_ofs.x/y; origin + offset equals muzzle. Outputs distinct from inputs. */
+void VR_CompatSplit(const float real[3], const float muzzle[3], const float proj_ofs[3],
+                    float origin[3], float offset[3]);
+/* Legacy full-vector subtraction (pure math). */
 void VR_CompatOrigin(const float muzzle[3], const float proj_ofs[3], float out[3]);
 /* No obstruction: muzzle unchanged. Otherwise hit is the first wall on the body/muzzle/aim probe;
  * place the muzzle clearance units before hit along start->hit, never behind start.

@@ -2,6 +2,16 @@
 
 #include <cmath>
 
+void VR_CompatSplit(const float real[3], const float muzzle[3], const float proj_ofs[3],
+                    float origin[3], float offset[3]) {
+	for (int i = 0; i < 2; ++i) {
+		origin[i] = muzzle[i] - proj_ofs[i];
+		offset[i] = proj_ofs[i];
+	}
+	origin[2] = real[2];
+	offset[2] = muzzle[2] - real[2];
+}
+
 void VR_CompatOrigin(const float muzzle[3], const float proj_ofs[3], float out[3]) {
 	for (int i = 0; i < 3; ++i)
 		out[i] = muzzle[i] - proj_ofs[i];

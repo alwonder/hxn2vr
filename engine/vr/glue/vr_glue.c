@@ -283,9 +283,19 @@ static void VRG_Start (void)
 	VID_VRSoundFocus ();	/* sound plays while VR runs, also with the desktop window unfocused */
 	Con_Printf ("VR: started (%s)\n", bname);
 	VRG_InputStart ();	/* button state, mock hands; may set (and announce) the default bindings */
-	if (Sys_FileType (FS_MakePath (FS_USERDIR, NULL, "vr_weapons.cfg")) & FS_ENT_FILE)
-		Cbuf_AddText ("exec vr_weapons.cfg\n");
+	/* R6: do not overwrite unsaved tuning after a runtime/video restart. */
+	{
+		static qboolean weapons_loaded;
+		if (!weapons_loaded)
+		{
+			weapons_loaded = true;
+			if (Sys_FileType (FS_MakePath (FS_USERDIR, NULL, "vr_weapons.cfg")) & FS_ENT_FILE)
+				Cbuf_AddText ("exec vr_weapons.cfg\n");
+		}
+	}
 }
+
+vec3_t vrg_camera_feet;
 
 static void VRG_Stop (void)
 {
@@ -674,6 +684,8 @@ qboolean VRG_UpdateScreen (void)
 		feet[2] -= cl.viewheight;
 		numvis = cl_numvisedicts;	/* R_DrawWorld appends static entities on every pass */
 	}
+
+	VectorCopy (feet, vrg_camera_feet);
 
 	/* the 2D layer (menus, console, HUD, centerprint...) goes into the panel texture first;
 	 * without a world the player stands at the origin */

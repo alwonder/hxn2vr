@@ -131,7 +131,7 @@ function Get-VrArgs([string]$backend) {
 $wCfgs = [ordered]@{}
 foreach ($class in 1..4) {
     $slot = if ($class -eq 1) { 4 } else { 2 }
-    $next = if ($class -lt 4) { "exec smoke_vr_w$($class + 1).cfg" } else { 'exec smoke_vr_wtune.cfg' }
+    $next = if ($class -lt 4) { "exec smoke_vr_w$($class + 1).cfg" } else { 'exec smoke_vr_wwall.cfg' }
     $commands = @(
         'skill 1; deathmatch 0; coop 0; vr_debug_fire 1; vr_compat 1; vr_mainhand 1; vr_world_scale 1.2; vr_eye_height 1.65; vr_roomscale 0; vr_seated 0; vr_height_offset 0; vr_crouch_physical 0; vr_mock_motion 0',
         'vr_haptics 1; vr_haptics_strength 1',
@@ -141,13 +141,13 @@ foreach ($class in 1..4) {
         ((@('wait') * 150) -join '; '),
         "impulse $slot",
         ((@('wait') * 150) -join '; '),
-        'vr_mock_hand right valid 1; vr_mock_hand right active 1; vr_mock_hand right px 0.4; vr_mock_hand right py 1.2; vr_mock_hand right pz -0.3',
+        'vr_mock_hand right valid 1; vr_mock_hand right active 1; vr_mock_hand right px 0.4; vr_mock_hand right py 1.0; vr_mock_hand right pz -0.3',
         'bind VR_TRIGGER +attack',
-        "alias wtracked `"echo HXW_${class}_tracked_end; vr_fireinfo`"; bind VR_X wtracked",
+        "alias wtracked `"echo HXW_${class}_tracked_end; vr_fireinfo; edict 1`"; bind VR_X wtracked",
         "alias wbefore `"echo HXW_${class}_untracked_begin; edict 1`"; bind VR_Y wbefore",
         "alias wafter `"edict 1; echo HXW_${class}_untracked_end`"; bind VR_OSTICK wafter",
         "alias wnext `"$next`"; bind VR_OGRIP wnext",
-        "echo HXW_${class}_tracked_begin; vr_where",
+        "echo HXW_${class}_tracked_begin; edict 1; vr_where",
         # Two seconds held, then three seconds for the firing animation/cooldown to settle.
         'vr_mock_hand right trigger 1 2; vr_mock_hand right trigger 0 4; vr_mock_hand left a 1 7; vr_mock_hand left a 0 8',
         # valid controls pose tracking, not active/buttons: the untracked trigger still attacks.
@@ -161,6 +161,7 @@ foreach ($class in 1..4) {
 # Class 4 slot 2 is models/crossbow.mdl (crossbow.hc). A zero entry makes
 # the 0.1 m tracking-X drag independently measurable in hand coordinates.
 $tuneCommands = @(
+    ((@('wait') * 150) -join '; '),
     'vr_gunangle 0; vr_mock_hand right valid 1; vr_mock_hand left grip 0; vr_mock_hand left stick 0; vr_mock_hand left px -0.2',
     ((@('wait') * 30) -join '; '),
     'bind VR_OGRIP "echo HXW_TUNE_BINDING_LEAK"; bind VR_OSTICK "echo HXW_TUNE_BINDING_LEAK"',
@@ -182,10 +183,35 @@ $tuneCommands = @(
     ((@('wait') * 30) -join '; '),  # at least 2 s at 15 fps; 5 s at 6 fps
     'screenshot; wait; wait; wait; disconnect; quit'
 )
+# Trace a clear wall fixture instead of relying on timed movement into demo1 stairs.
+# The mock-only fixture uses noclip to eliminate gravity; two samples verify rest.
+$wallCommands = @(
+    '-forward; -back; -moveleft; -moveright; -moveup; -movedown; -jump; -attack',
+    'vr_mock_hand left sx 0; vr_mock_hand left sy 0; vr_mock_hand right sx 0; vr_mock_hand right sy 0; vr_mock_hand right trigger 0; vr_mock_head 0 0 0',
+    'vr_mock_hand right valid 1; vr_mock_hand right px 0; vr_mock_hand right py 1.0; vr_mock_hand right pz -2; vr_mock_hand right yaw 0; vr_mock_hand right pitch 0; vr_weapon_offset models/crossbow.mdl 0 0 0 0 0 0 1',
+    ((@('wait') * 150) -join '; '),
+    'vr_mock_wall place',
+    ((@('wait') * 150) -join '; '),
+    'echo HXW_wall_stable_begin; vr_where',
+    ((@('wait') * 150) -join '; '),
+    'vr_where; echo HXW_wall_stable_end',
+    'alias wwallend "vr_where; echo HXW_wall_end; edict 1; impulse 1; exec smoke_vr_wmelee.cfg"; bind VR_X wwallend',
+    'echo HXW_wall_begin; edict 1; vr_where',
+    'vr_mock_hand right trigger 1 2; vr_mock_hand right trigger 0 4; vr_mock_hand left a 1 8; vr_mock_hand left a 0 9'
+)
+$wCfgs['smoke_vr_wwall.cfg'] = (@($wallCommands | ForEach-Object { $_; 'wait'; 'wait'; 'wait' }) -join "`n")
+$meleeCommands = @(
+    ((@('wait') * 150) -join '; '),
+    'vr_mock_hand right pz -0.3; vr_mock_hand right px 0.4',
+    'alias wmeleeend "echo HXW_melee_end; vr_mock_wall restore; impulse 2; exec smoke_vr_wtune.cfg"; bind VR_X wmeleeend',
+    'echo HXW_melee_begin',
+    'vr_mock_hand right trigger 1 2; vr_mock_hand right trigger 0 4; vr_mock_hand left a 1 8; vr_mock_hand left a 0 9'
+)
+$wCfgs['smoke_vr_wmelee.cfg'] = (@($meleeCommands | ForEach-Object { $_; 'wait'; 'wait'; 'wait' }) -join "`n")
 $wCfgs['smoke_vr_wtune.cfg'] = (@($tuneCommands | ForEach-Object { $_; 'wait'; 'wait'; 'wait' }) -join "`n")
 
 $all = [ordered]@{
-    w = @{ Commands = @('exec smoke_vr_w1.cfg'); Stereo = $true; Weapon = $true; ExpectQuit = $true; Shot = $true; WaitLines = 3; TimeoutSec = 600; Pending = $false }
+    w = @{ Commands = @('exec smoke_vr_w1.cfg'); Stereo = $true; Weapon = $true; ExpectQuit = $true; Shot = $true; WaitLines = 3; TimeoutSec = 900; Pending = $false }
     a = @{ Commands = @('map demo1'); Stereo = $true; Pending = $false; Recenter = $true }   # auto-recenter must have run
     b = @{ Commands = @('map demo1', 'changelevel demo2'); Stereo = $true; Pending = $false }
     c = @{ Commands = @('echo vr-mock-smoke: console only'); Stereo = $false; Pending = $false }   # 2D panel with no world
@@ -261,6 +287,75 @@ $all = [ordered]@{
             'vr_mock_hand right a 1', 'vr_mock_hand right a 0',       # the "quit?" box
             'vr_mock_hand right a 1', 'vr_mock_hand right a 0');      # quit
         ExpectQuit = $true; WaitLines = 3; Pending = $false }
+}
+
+# Check wall geometry in world units along the logged aim, including stock eye fallback.
+function Test-VrWallWindow([string]$text) {
+    $num = '(-?\d+(?:\.\d+)?)'
+    $ready = [regex]::Match($text, "(?m)^HXW_wall_fixture_ready distance $num$")
+    if (-not $ready.Success) { return 'wall fixture did not find a clear hull/eye' }
+    $distance = [double]::Parse($ready.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture)
+    if ($distance -lt 20 -or $distance -gt 60) { return 'wall fixture distance is outside 20..60 units' }
+    $stable = [regex]::Match($text, '(?ms)^HXW_wall_stable_begin[^\S\n]*\n(.*?)^HXW_wall_stable_end')
+    $whereRe = "(?m)^VR: where origin $num $num $num yaw "
+    $samples = [regex]::Matches($stable.Groups[1].Value, $whereRe)
+    if ($samples.Count -ne 2) { return 'missing two wall approach rest samples' }
+    $rest = @()
+    foreach ($axis in 1..3) {
+        $a = [double]::Parse($samples[0].Groups[$axis].Value, [Globalization.CultureInfo]::InvariantCulture)
+        $b = [double]::Parse($samples[1].Groups[$axis].Value, [Globalization.CultureInfo]::InvariantCulture)
+        if ([Math]::Abs($a - $b) -gt 0.1) { return 'wall approach is still moving before the shot' }
+        $rest += $b
+    }
+    $wall = [regex]::Match($text, '(?ms)^HXW_wall_begin[^\S\n]*\n(.*?)^HXW_wall_end')
+    if (-not $wall.Success) { return 'missing wall-shot window' }
+    # Pair each spawn with its immediate clamp diagnostic; check every shot, not just the first.
+    $fireRe = "^VR: fire muzzle $num $num $num body $num $num $num proj $num $num $num$"
+    $probeRe = "^VR: clamp raw $num $num $num hit $num $num $num start ([01]) eye $num $num $num aim $num $num $num$"
+    $shots = [regex]::Matches($wall.Groups[1].Value, "(?m)$fireRe\n$probeRe")
+    $fireCount = [regex]::Matches($wall.Groups[1].Value, "(?m)$fireRe").Count
+    if ($shots.Count -eq 0 -or $shots.Count -ne $fireCount) { return 'wall shot did not engage the clamp or is missing probe evidence' }
+    foreach ($shot in $shots) {
+        if ($shot.Groups[16].Value -eq '1') { return 'approach put the eye in solid' }
+        $raw2 = 0.0; $clamped2 = 0.0; $muzzleEye2 = 0.0; $projectileEye2 = 0.0
+        $shotAlong = 0.0; $hitAlong = 0.0; $aim2 = 0.0
+        foreach ($axis in 1..3) {
+            $muzzle = [double]::Parse($shot.Groups[$axis].Value, [Globalization.CultureInfo]::InvariantCulture)
+            $body = [double]::Parse($shot.Groups[$axis + 3].Value, [Globalization.CultureInfo]::InvariantCulture)
+            $projectile = [double]::Parse($shot.Groups[$axis + 6].Value, [Globalization.CultureInfo]::InvariantCulture)
+            $raw = [double]::Parse($shot.Groups[$axis + 9].Value, [Globalization.CultureInfo]::InvariantCulture)
+            $hit = [double]::Parse($shot.Groups[$axis + 12].Value, [Globalization.CultureInfo]::InvariantCulture)
+            $eye = [double]::Parse($shot.Groups[$axis + 16].Value, [Globalization.CultureInfo]::InvariantCulture)
+            $aim = [double]::Parse($shot.Groups[$axis + 19].Value, [Globalization.CultureInfo]::InvariantCulture)
+            if ([Math]::Abs($body - $rest[$axis - 1]) -gt 0.15) { return 'wall body moved during the shot window' }
+            if ($axis -le 2) {
+                $raw2 += ($raw - $body) * ($raw - $body)
+                $clamped2 += ($muzzle - $body) * ($muzzle - $body)
+            }
+            $muzzleEye2 += ($muzzle - $eye) * ($muzzle - $eye)
+            $projectileEye2 += ($projectile - $eye) * ($projectile - $eye)
+            $shotAlong += ($projectile - $eye) * $aim
+            $hitAlong += ($hit - $eye) * $aim
+            $aim2 += $aim * $aim
+        }
+        if ([Math]::Abs($aim2 - 1) -gt 0.001) { return 'invalid wall probe aim direction' }
+        if ($clamped2 -ge $raw2 - 0.01) { return 'wall muzzle was not pulled back toward the body' }
+        # Within clearance, clamping to the eye leaves stock progs its ordinary
+        # eye + k*aim spawn (k <= 16). A real startsolid was rejected above.
+        if ($muzzleEye2 -le 0.01) {
+            if ($projectileEye2 -gt 16.01 * 16.01 -or $shotAlong -lt -0.01) { return 'eye fallback projectile exceeds stock 16-unit clearance' }
+        }
+        elseif ($shotAlong -gt $hitAlong + 0.01) { return 'wall projectile is beyond the hit along aim' }
+    }
+    $after = [regex]::Matches($wall.Groups[1].Value, $whereRe)
+    if ($after.Count -lt 2) { return 'missing wall-shot before/after origin samples' }
+    foreach ($sample in $after) {
+        foreach ($axis in 1..3) {
+            $value = [double]::Parse($sample.Groups[$axis].Value, [Globalization.CultureInfo]::InvariantCulture)
+            if ([Math]::Abs($value - $rest[$axis - 1]) -gt 0.1) { return 'wall body moved during the shot window' }
+        }
+    }
+    return $null
 }
 
 # Returns $null if the log is right, 'SKIP: ...' if the scenario cannot run here, else the failure text.
@@ -380,6 +475,10 @@ function Test-VrLog([string]$path, $sc) {
         if ($saved.Count -ne 1 -or -not $afterEntry.Success -or $saved[0] -cne $afterEntry.Groups[1].Value) { return 'saved cfg does not match the moved entry from vr_weapon_list' }
         $num = '(-?\d+(?:\.\d+)?)'
         $fireRe = "^VR: fire muzzle $num $num $num body $num $num $num proj $num $num $num$"
+        $melee = [regex]::Match($text, '(?ms)^HXW_melee_begin[^\S\n]*\n(.*?)^HXW_melee_end')
+        if (-not $melee.Success -or $melee.Groups[1].Value -cnotmatch '(?m)^VR: haptic 1 0\.6 0\.04 sound\r?$') { return 'melee did not exercise sound haptic path A' }
+        $wallError = Test-VrWallWindow $text
+        if ($wallError) { return $wallError }
         foreach ($class in 1..4) {
             $tracked = [regex]::Matches($text, "(?ms)^HXW_${class}_tracked_begin[^\S\n]*\n(.*?)^HXW_${class}_tracked_end[^\S\n]*$")
             if ($tracked.Count -ne 1) { return "class ${class}: missing/duplicate tracked window" }
@@ -389,7 +488,7 @@ function Test-VrLog([string]$path, $sc) {
             $yaw = [double]::Parse($where.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture) * [Math]::PI / 180
             $fires = @($section -split "`n" | ForEach-Object { $_.TrimEnd("`r") } | Where-Object { $_ -cmatch $fireRe })
             if ($fires.Count -lt 1) { return "class ${class}: no wrapped projectile" }
-            if ($section -cnotmatch '(?ms)^VR: fire muzzle [^\n]*\n.*?^VR: haptic 1 0\.6 0\.04\r?$') { return "class ${class}: no right-hand weapon haptic after firing" }
+            if ($section -cnotmatch '(?ms)^VR: fire muzzle [^\n]*\n.*?^VR: haptic 1 0\.6 0\.04 (?:sound|spawn)\r?$') { return "class $($class): no right-hand weapon haptic after firing" }
             foreach ($fire in $fires) {
                 [void]($fire -cmatch $fireRe)
                 $dx = [double]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture) - [double]::Parse($Matches[4], [Globalization.CultureInfo]::InvariantCulture)
@@ -407,7 +506,11 @@ function Test-VrLog([string]$path, $sc) {
             $info = [regex]::Match($text, "(?m)^HXW_${class}_tracked_end[^\S\n]*\n([^\r\n]+)")
             $expectedInfo = $fires[-1] -creplace '^VR: fire ', 'VR: last fire '
             if (-not $info.Success -or $info.Groups[1].Value -cne $expectedInfo) { return "class ${class}: vr_fireinfo did not replay the last wrapped fire" }
-            $untracked = [regex]::Matches($text, "(?ms)^HXW_${class}_untracked_begin[^\S\n]*\n(.*?)^HXW_${class}_untracked_end[^\S\n]*$")
+            # Relaxed py=1.0 m firing must leave the real server origin z unchanged.
+            $beforeBody = [regex]::Match($tracked[0].Groups[1].Value, "(?ms)^EDICT 1:\r?\n.*?^origin\s+[^\r\n]*?(-?\d+(?:\.\d+)?)['\s]*$")
+            $afterBody = [regex]::Match($text, "(?ms)^HXW_$($class)_tracked_end[^\S\n]*\n[^\n]*\n\s*EDICT 1:\r?\n.*?^origin\s+[^\r\n]*?(-?\d+(?:\.\d+)?)['\s]*$")
+            if (-not $beforeBody.Success -or -not $afterBody.Success -or $beforeBody.Groups[1].Value -ne $afterBody.Groups[1].Value) { return "class $($class): low-hand shot changed body z or missing origin dump" }
+            $untracked = [regex]::Matches($text, "(?ms)^HXW_$($class)_untracked_begin[^\S\n]*\n(.*?)^HXW_$($class)_untracked_end[^\S\n]*$")
             if ($untracked.Count -ne 1) { return "class ${class}: missing/duplicate untracked window" }
             $section = $untracked[0].Groups[1].Value
             if ($section -cmatch '(?m)^VR: fire') { return "class ${class}: wrapper ran with an untracked hand" }
@@ -432,7 +535,8 @@ function Test-VrLog([string]$path, $sc) {
     $bad = @($vrLines | Where-Object { $_ -cne 'VR: started (mock)' -and $_ -cne 'VR: stopped' -and $_ -cne 'VR: recentered' -and
         $_ -cne 'VR: default controller bindings set' -and $_ -cnotmatch '^VR: where ' -and
         -not ($sc.Weapon -and $_ -ceq 'VR: saved 1 weapon offsets to vr_weapons.cfg') -and
-        -not ($sc.Weapon -and $_ -cmatch '^VR: haptic [01] (?:0(?:\.\d+)?|1) 0\.(?:04|12)$') -and
+        -not ($sc.Weapon -and $_ -cmatch '^VR: haptic [01] (?:0(?:\.\d+)?|1) 0\.(?:04|12) (?:sound|spawn|damage)$') -and
+        -not ($sc.Weapon -and $_ -cmatch '^VR: clamp raw (?:-?\d+\.\d{3} ){3}hit (?:-?\d+\.\d{3} ){3}start [01] eye (?:-?\d+\.\d{3} ){3}aim -?\d+\.\d{6} -?\d+\.\d{6} -?\d+\.\d{6}$') -and
         $_ -cnotmatch '^VR: calibration done: ' -and -not ($sc.Weapon -and $_ -cmatch '^VR: (?:last )?fire muzzle -?\d+\.\d{3} -?\d+\.\d{3} -?\d+\.\d{3} body -?\d+\.\d{3} -?\d+\.\d{3} -?\d+\.\d{3} proj -?\d+\.\d{3} -?\d+\.\d{3} -?\d+\.\d{3}$') })
     if ($bad.Count) { return "log has VR error line(s): $($bad -join ' | ')" }
     return $null
