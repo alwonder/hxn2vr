@@ -214,17 +214,26 @@ void VR_RoomStep(vr_room_t *r, const vr_vec3_t *head, float body_yaw, float upm,
 
 /* VR move block: the client's VR data for its local server, sent after the move in its own message
  * (clc_hxvr, u8 len, len bytes of the block); the protocol number does not change. */
-#define VR_MOVEBLOCK_VERSION 1
+#define VR_MOVEBLOCK_VERSION 2
 #define VR_MOVEBLOCK_MAX     64        /* bytes on the wire, length-prefixed */
 #define VR_MOVE_ROOMSCALE    0x01u
-typedef struct { int version; unsigned flags; float roomscale[2]; } vr_moveblock_t;   /* roomscale: world units */
+#define VR_MOVE_WEAPON       0x02u    /* muzzle and aim valid (main hand tracked) */
+typedef struct {
+	int version; unsigned flags; float roomscale[2];
+	float muzzle[3];   /* world units relative to the player's feet */
+	float aim[3];      /* Quake pitch, yaw, roll in degrees */
+} vr_moveblock_t;
 /* v1 layout: u8 version, u8 flags, f32 LE roomscale x, f32 LE roomscale y (10 bytes). Returns bytes written,
- * 0 if cap < 10. Read: 1 = ok; 0 if len < 10, version 0, or a non-finite float. Newer versions are read
- * by their v1 prefix (trailing bytes ignored; version reported as sent).
+ * v2 appends muzzle and aim (six f32 LE), for 34 bytes. Write: 0 if capacity is insufficient.
+ * Read: 1 = ok; 0 if len < 10, version 0, or a non-finite float in the recognized prefix.
+ * Version 1 or len 10..33 clears WEAPON and zeros muzzle/aim. Version >= 2 with len >= 34 reads
+ * the v2 prefix; trailing bytes are ignored and the version is reported as sent.
  * Also 0 for NULL arguments; Write: 0 for a version outside 1..255 (flags: the low 8 bits are sent);
  * Read: *out is untouched unless it returns 1. */
 int VR_WriteMoveBlock(const vr_moveblock_t *b, unsigned char *buf, int cap);
 int VR_ReadMoveBlock(const unsigned char *buf, int len, vr_moveblock_t *out);
+/* server sanity: finite, |muzzle| <= 96 world units (0 for NULL) */
+int VR_MuzzleOffsetOk(const float muzzle[3]);
 /* server sanity: finite, and |accumulated move| <= 64 units (0 for NULL) */
 int VR_RoomscaleMoveOk(const float move[2]);
 

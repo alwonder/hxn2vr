@@ -131,6 +131,10 @@ typedef struct client_s
 	unsigned int	info_mask, info_mask2;
 
 	float		hxvr_move[2];	/* HXVR: room-scale move (world units) summed from clc_hxvr until the next physics tick */
+	/* HXVR: most recent valid tracked weapon data from clc_hxvr v2 */
+	qboolean	hxvr_weapon;
+	float		hxvr_muzzle[3], hxvr_aim[3];
+	double		hxvr_weapon_time;
 } client_t;
 
 

@@ -1,0 +1,10 @@
+/* Internal weapon glue; include after quakedef.h. */
+#ifndef HXVR_VR_GLUE_WEAPON_H
+#define HXVR_VR_GLUE_WEAPON_H
+
+extern cvar_t vr_compat;
+extern cvar_t vr_gunangle;
+void VRG_WeaponInit (void);
+void VRG_WeaponPose (float muzzle_world[3], float aim_angles[3], qboolean *valid);
+
+#endif /* HXVR_VR_GLUE_WEAPON_H */

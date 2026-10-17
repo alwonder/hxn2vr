@@ -11,6 +11,7 @@
 #include "vr_api.h"
 #include "vr_glue.h"
 #include "vr_glue_int.h"
+#include "vr_glue_weapon.h"
 
 cvar_t	vr_seated = {"vr_seated", "0", CVAR_ARCHIVE};			/* 1: no physical crouch, height from vr_height_offset */
 cvar_t	vr_height_offset = {"vr_height_offset", "0", CVAR_ARCHIVE};	/* metres, added to the y of head and hands */
@@ -226,6 +227,8 @@ void VRG_WriteMoveBlock (sizebuf_t *buf)
 {
 	vr_moveblock_t	b;
 	unsigned char	blk[VR_MOVEBLOCK_MAX];
+	float		muzzle[3];
+	qboolean	valid;
 	int		n;
 
 	if (!VR_IsRunning () || !sv.active || cls.state != ca_connected || cls.demoplayback)
@@ -239,6 +242,12 @@ void VRG_WriteMoveBlock (sizebuf_t *buf)
 		b.roomscale[1] = vrg_room_excess[1];
 	}
 	vrg_room_excess[0] = vrg_room_excess[1] = 0;
+	VRG_WeaponPose (muzzle, b.aim, &valid);
+	if (valid && vr_compat.integer)
+	{
+		b.flags |= VR_MOVE_WEAPON;
+		VectorSubtract (muzzle, cl_entities[cl.viewentity].origin, b.muzzle);
+	}
 	n = VR_WriteMoveBlock (&b, blk, (int) sizeof(blk));
 	if (n <= 0 || buf->cursize + 2 + n > buf->maxsize)
 		return;

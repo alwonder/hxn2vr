@@ -95,6 +95,7 @@ set(HXN2VR_SOURCES
     engine/vr/glue/vr_glue_input.c
     engine/vr/glue/vr_glue_body.c
     engine/vr/glue/vr_glue_server.c
+    engine/vr/glue/vr_glue_weapon.c
 
     engine/h2shared/win32res.rc
 )

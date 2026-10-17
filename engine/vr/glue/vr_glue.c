@@ -8,6 +8,7 @@
 #include "vr_api.h"
 #include "vr_glue.h"
 #include "vr_glue_int.h"
+#include "vr_glue_weapon.h"
 
 cvar_t	vr_enabled = {"vr_enabled", "0", CVAR_ARCHIVE};
 cvar_t	vr_backend = {"vr_backend", "openxr", CVAR_ARCHIVE};	/* openxr / mock */
@@ -45,6 +46,7 @@ void VRG_Init (void)
 	Cmd_AddCommand ("vr_status", VRG_Status_f);
 	VRG_InputInit ();	/* vr_mainhand, vr_bind_defaults, vr_mock_hand, vr_mock_head */
 	VRG_BodyInit ();	/* vr_seated, vr_height_offset, vr_body_*, vr_calibrate, vr_body */
+	VRG_WeaponInit ();
 }
 
 /* ---- VR session state ---- */
@@ -433,17 +435,21 @@ void VRG_PreInput (void)
 	cl.viewangles[ROLL] = 0;
 }
 
-/* After IN_Move: take the turned body yaw and compose it with the head's angles; this is
- * what CL_SendMove sends (movement and shooting follow the head in phase 1). */
+/* After IN_Move: save the turned body yaw, then send weapon aim (head aim if untracked). */
 void VRG_PostInput (void)
 {
-	float	head[3], view[3];
+	float	head[3], view[3], muzzle[3];
+	qboolean valid;
 
 	if (!VR_IsRunning() || cls.demoplayback)
 		return;
 	vrg_body_yaw = cl.viewangles[YAW];
-	VRG_HeadAngles (head);
-	VR_ComposeViewAngles (vrg_body_yaw, head, view);
+	VRG_WeaponPose (muzzle, view, &valid);
+	if (!valid)
+	{
+		VRG_HeadAngles (head);
+		VR_ComposeViewAngles (vrg_body_yaw, head, view);
+	}
 	VectorCopy (view, cl.viewangles);
 }
 

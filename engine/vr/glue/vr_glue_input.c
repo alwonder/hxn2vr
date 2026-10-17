@@ -297,7 +297,10 @@ void VRG_StickMove (usercmd_t *cmd)
 	VR_TrackingToQuakeAngles (&head_pose.rot, head);
 	/* a hand without a valid pose keeps stale poses: VR_MoveYaw falls back to the head */
 	move_yaw = VR_MoveYaw (vr_movement_mode.integer, &h.aim.rot, h.pose_valid, head[YAW], vrg_body_yaw);
-	view_yaw = vrg_body_yaw + head[YAW];
+	/* The server now moves in the main hand's aim frame; retain the off hand/head movement direction. */
+	view_yaw = VR_MoveYaw (1, &hands[VRG_MainHand ()].aim.rot,
+			hands[VRG_MainHand ()].active && hands[VRG_MainHand ()].pose_valid,
+			head[YAW], vrg_body_yaw);
 	VR_StickToMove (stick, move_yaw, view_yaw, 200.0f, move);
 	cmd->forwardmove += move[0];
 	cmd->sidemove += move[1];
@@ -422,6 +425,7 @@ void VRG_InputStart (void)
 /* what vr_mock_hand last sent to the module, one copy per hand (the mock's default hands after a
  * VR start: active, both poses valid, held in front of the chest) */
 static vr_hand_t	vrg_mock_hand[2];
+static float	vrg_mock_angles[2][2];   /* Quake yaw and pitch, degrees */
 
 /* delayed vr_mock_hand changes (host time), applied in order by VRG_InputFrame -- which also runs
  * inside a modal dialog's loop, where the command buffer does not run */
@@ -439,6 +443,7 @@ static void VRG_MockHandsReset (void)
 	int	i;
 
 	memset (vrg_mock_hand, 0, sizeof(vrg_mock_hand));
+	memset (vrg_mock_angles, 0, sizeof(vrg_mock_angles));
 	vrg_mock_queued = 0;
 	for (i = 0; i < 2; i++)
 	{
@@ -455,7 +460,7 @@ static void VRG_MockHandsReset (void)
 
 static void VRG_MockHandUsage (void)
 {
-	Con_Printf ("VR: usage: vr_mock_hand <left|right> <trigger|grip|a|b|stick|menu|sx|sy|active|valid> <value> [delay]\n");
+	Con_Printf ("VR: usage: vr_mock_hand <left|right> <trigger|grip|a|b|stick|menu|sx|sy|active|valid|px|py|pz|yaw|pitch> <value> [delay]\n");
 }
 
 static void VRG_SetButton (vr_hand_t *h, unsigned bit, qboolean on)
@@ -467,7 +472,8 @@ static void VRG_SetButton (vr_hand_t *h, unsigned bit, qboolean on)
 }
 
 static const char	*vrg_mock_fields[] = {
-	"trigger", "grip", "a", "b", "stick", "menu", "sx", "sy", "active", "valid"
+	"trigger", "grip", "a", "b", "stick", "menu", "sx", "sy", "active", "valid",
+	"px", "py", "pz", "yaw", "pitch"
 };
 #define VRG_NUM_MOCK_FIELDS	((int) (sizeof(vrg_mock_fields) / sizeof(vrg_mock_fields[0])))
 
@@ -488,7 +494,26 @@ static void VRG_MockApply (int hand, int field, float v)
 	case 7:	h->stick[1] = v;				break;
 	case 8:	h->active = (v != 0);				break;
 	case 9:	h->pose_valid = (v != 0);			break;
+	case 10: h->grip.pos.x = h->aim.pos.x = v;		break;
+	case 11: h->grip.pos.y = h->aim.pos.y = v;		break;
+	case 12: h->grip.pos.z = h->aim.pos.z = v;		break;
+	case 13: vrg_mock_angles[hand][0] = v;			break;
+	case 14: vrg_mock_angles[hand][1] = v;			break;
 	default:						return;
+	}
+	if (field == 13 || field == 14)
+	{
+		/* Tracking rotation: +Y yaw turns left; -X pitch points down.
+		 * q = yaw(Y) * pitch(-X), using half angles in radians. */
+		const float yaw = vrg_mock_angles[hand][0] * (3.14159265358979323846f / 360.0f);
+		const float pitch = vrg_mock_angles[hand][1] * (3.14159265358979323846f / 360.0f);
+		const float sy = sinf (yaw), cy = cosf (yaw), sp = sinf (pitch), cp = cosf (pitch);
+
+		h->aim.rot.x = -cy * sp;
+		h->aim.rot.y = sy * cp;
+		h->aim.rot.z = sy * sp;
+		h->aim.rot.w = cy * cp;
+		h->grip.rot = h->aim.rot;
 	}
 	VR_MockSetHand (hand, h);
 }

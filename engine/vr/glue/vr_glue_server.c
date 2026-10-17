@@ -33,6 +33,15 @@ void VRG_ServerReadMoveBlock (client_t *cl)
 		return;
 	if (!cl->netconnection || strcmp (NET_QSocketGetAddressString (cl->netconnection), "LOCAL"))
 		return;
+	cl->hxvr_weapon = false;
+	if ((b.flags & VR_MOVE_WEAPON) && VR_MuzzleOffsetOk (b.muzzle))
+	{
+		cl->hxvr_weapon = true;
+		VectorCopy (b.muzzle, cl->hxvr_muzzle);
+		VectorCopy (b.aim, cl->hxvr_aim);
+		VectorCopy (b.aim, cl->edict->v.v_angle);
+		cl->hxvr_weapon_time = sv.time;
+	}
 	if (b.flags & VR_MOVE_ROOMSCALE)
 	{
 		cl->hxvr_move[0] += b.roomscale[0];
