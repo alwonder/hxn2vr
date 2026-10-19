@@ -27,6 +27,8 @@ static int vrg_tune_hand;
 static qmodel_t *vrg_tune_model;
 static vr_weapon_entry_t vrg_tune_entry, vrg_grab_relative;
 static double vrg_last_weapon_pulse = -1;
+static int vrg_shot_frames;
+static double vrg_pulse_due;
 
 qboolean VRG_WeaponTuning (void) { return vrg_tuning && VR_IsRunning (); }
 
@@ -84,6 +86,8 @@ void VRG_WeaponTuneReset (void)
 {
 	vrg_tuning = vrg_grabbed = vrg_grip_down = false;
 	vrg_tune_model = NULL;
+	vrg_shot_frames = 0;
+	vrg_pulse_due = 0;
 }
 
 static void VRG_WeaponSave_f (void);
@@ -125,8 +129,6 @@ static void VRG_WeaponTune_f (void)
  * screenshot and pulses twice. */
 #define VRG_SHOT_FRAMES 3
 #define VRG_PULSE_GAP 0.15
-static int vrg_shot_frames;
-static double vrg_pulse_due;
 
 void VRG_WeaponTuneChord (void)
 {

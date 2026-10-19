@@ -169,7 +169,7 @@ static qboolean VRG_ChordAllowed (void)
 {
 	return VR_IsRunning () && Key_GetDest () == key_game && !vrg_input_modal && !cls.demoplayback &&
 		cls.signon == SIGNONS && cl.worldmodel && !cl.intermission && !cl.v.cameramode &&
-		cl.v.health > 0;
+		cl.v.health > 0 && !VRG_Calibrating ();
 }
 
 static const int	vrg_dir_key[5] = { 0, K_UPARROW, K_DOWNARROW, K_LEFTARROW, K_RIGHTARROW };	/* VR_DIR_* */
