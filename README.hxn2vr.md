@@ -22,6 +22,8 @@
 
 Запуск в шлеме: `scripts\play-vr.cmd` (нужна Release-сборка и подключённый OpenXR-рантайм, например Virtual Desktop или SteamVR). Лог: `build\game\debug_h2.log`.
 
+Оконный лаунчер: `scripts\launcher.cmd` — выбор Release/Debug, сборки перед запуском, OpenXR или mock, карты, класса и отладочных команд. Настройки сохраняются в `build\launcher-settings.json`; кнопка Open log открывает лог. Для просмотра команды без окна, сборки и запуска: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/launcher.ps1 -PrintCommand -Backend mock -Map demo1`.
+
 Cvar'ы пишутся в консоли и на командной строке как `vr_x значение` / `+vr_x значение` (команды `set` в Hexen II нет). Все cvar'ы этапа 2 сохраняются в `config.cfg`, кроме `vr_mock_*`.
 
 ### Раскладка по умолчанию
