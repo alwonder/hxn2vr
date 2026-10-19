@@ -17,6 +17,6 @@ if not exist "%GAME%\data1\pak0.pak" (
 )
 pushd "%GAME%"
 rem The engine does not strip quotes from -basedir: run from the game dir and pass "." unquoted.
-start "hxn2vr" "%EXE%" -basedir . -window -condebug +_enable_mouse 1 +vr_backend openxr +vr_debug_ticks 1 +vr_enabled 1 %*
+start "hxn2vr" "%EXE%" -basedir . -window -condebug +_enable_mouse 1 +vr_backend openxr +vr_enabled 1 %*
 popd
 endlocal
