@@ -159,6 +159,19 @@ void VRG_ReleaseAllKeys (void)
 	}
 }
 
+#define VRG_CHORD_HOLD	1.0f	/* seconds */
+static vr_chord_t	vrg_chord;
+static int		vrg_chord_suppress;
+
+/* The chord works only in the running game: world loaded, signed on, not a demo, not a dialog, no
+ * intermission / camera cutscene, player alive. Elsewhere B and Y keep their menu / binding roles. */
+static qboolean VRG_ChordAllowed (void)
+{
+	return VR_IsRunning () && Key_GetDest () == key_game && !vrg_input_modal && !cls.demoplayback &&
+		cls.signon == SIGNONS && cl.worldmodel && !cl.intermission && !cl.v.cameramode &&
+		cl.v.health > 0;
+}
+
 static const int	vrg_dir_key[5] = { 0, K_UPARROW, K_DOWNARROW, K_LEFTARROW, K_RIGHTARROW };	/* VR_DIR_* */
 
 static void VRG_MockQueueRun (double now);
@@ -186,6 +199,33 @@ void VRG_InputFrame (void)
 	serial = ++vrg_in_serial;
 	VRG_WeaponTuneFrame (dt);
 #define VRG_INTERRUPTED()	(vrg_in_serial != serial)
+	/* B+Y chord (main hand UPPER + off hand UPPER, VRG_CHORD_HOLD seconds) toggles weapon tuning. While a
+	 * pair is held the two buttons send nothing to bindings; a first button already pressed is released. */
+	{
+		vr_hand_t	mh, oh;
+		vr_chord_out_t	co;
+
+		VRG_WeaponChordFrame ();
+		if (VRG_ChordAllowed ())
+		{
+			VR_GetHand (main_hand, &mh);
+			VR_GetHand (1 - main_hand, &oh);
+			VR_ChordStep (&vrg_chord, mh.active && (mh.buttons & VR_BTN_UPPER),
+					oh.active && (oh.buttons & VR_BTN_UPPER), dt, VRG_CHORD_HOLD, &co);
+		}
+		else
+		{
+			memset (&vrg_chord, 0, sizeof(vrg_chord));
+			memset (&co, 0, sizeof(co));
+		}
+		vrg_chord_suppress = co.suppress;
+		if (co.fire)
+		{
+			VRG_WeaponTuneChord ();
+			if (VRG_INTERRUPTED ())
+				return;
+		}
+	}
 	for (hand = 0; hand < 2; hand++)
 	{
 		const int	role = (hand == main_hand) ? 0 : 1;
@@ -200,9 +240,10 @@ void VRG_InputFrame (void)
 		{
 			const unsigned	bit = vrg_button_bit[b];
 
-			if (role == 1 && VRG_WeaponTuning () && (bit & (VR_BTN_GRIP | VR_BTN_STICK)))
+			if ((role == 1 && VRG_WeaponTuning () && (bit & (VR_BTN_GRIP | VR_BTN_STICK))) ||
+				(vrg_chord_suppress && bit == VR_BTN_UPPER))
 			{
-				/* Keep physical edges: leaving tune while held must not press a binding. */
+				/* Keep physical edges: leaving tune (or the chord) while held must not press a binding. */
 				vrg_in_buttons[hand] = (vrg_in_buttons[hand] & ~bit) | (down & bit);
 				key = vrg_in_key[hand][b];
 				vrg_in_key[hand][b] = 0;
@@ -420,6 +461,8 @@ void VRG_InputStart (void)
 	memset (vrg_in_key, 0, sizeof(vrg_in_key));
 	memset (vrg_in_repeat, 0, sizeof(vrg_in_repeat));
 	memset (&vrg_turn, 0, sizeof(vrg_turn));
+	memset (&vrg_chord, 0, sizeof(vrg_chord));
+	vrg_chord_suppress = 0;
 	vrg_vignette = 0;
 	vrg_vignette_time = 0;
 	vrg_in_main = VRG_MainHand ();

@@ -231,4 +231,35 @@ float VR_TurnStep(vr_turn_t* t, float stick_x, float dt, int smooth, float snap_
 	return stick_x > 0.0f ? -snap_deg : snap_deg;
 }
 
+void VR_ChordStep(vr_chord_t* c, int main_down, int off_down, float dt, float hold_seconds, vr_chord_out_t* out) {
+	vr_chord_out_t r = {0, 0, 0};
+	if (c) {
+		const bool m = main_down != 0, o = off_down != 0;
+		if (!std::isfinite(dt) || dt < 0.0f) dt = 0.0f;
+		if (!c->latched) {
+			if (m && o) {   // the second button of the pair went down
+				c->latched = 1;
+				c->alive = 1;
+				c->fired = 0;
+				c->held = 0.0f;
+				r.suppress = 1;
+				r.pair_started = 1;
+			}
+		} else if (!m && !o) {   // both up: the next press starts a new pair
+			*c = vr_chord_t{};
+		} else {
+			r.suppress = 1;
+			if (!(m && o)) c->alive = 0;   // released early: cancelled until both are up
+			if (c->alive && !c->fired) {
+				c->held += dt;
+				if (std::isfinite(hold_seconds) && c->held >= hold_seconds) {
+					c->fired = 1;
+					r.fire = 1;
+				}
+			}
+		}
+	}
+	if (out) *out = r;
+}
+
 }  // extern "C"

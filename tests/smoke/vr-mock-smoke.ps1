@@ -52,6 +52,9 @@
        After tuning, move the off-hand grip into view; hexen00 is an indicators-off baseline,
        hexen01 is the final shot with marker and dot enabled. Check stereo and new connected
        marker/dot colour patches against the baseline (check_shot --indicators-baseline).
+       Then the B+Y tuning chord (right b + left b held 1 s): a pair released early toggles nothing, chord 1
+       enters tuning (2 pulses), chord 2 saves, prints the screenshot line (hexen02 exists) and gives 4 pulses;
+       +crouch is released by the second press and Y never reaches its binding.
     h  map demo1, mock controller only -> room-scale walking on the server (clc_hxvr): `vr_where` (A), the mock
        head walks 1 m forward over 2 s (`vr_mock_head 0 0 -1 2`), `vr_where` (B). The head leans up to the
        0.25 m radius (9.09 units), the remaining 0.75 m (27 units) goes to the local server in the VR move
@@ -69,7 +72,7 @@
        The button part runs from delayed `vr_mock_hand ... <delay>` changes after the script has ended: a
        key's binding is appended to the command buffer (Cbuf_AddText), so while script lines are still
        queued, +crouch / -crouch would only run after the whole script and crouchkey could never be 1.
-       E and F come from the off hand's Y, bound to +hxw (`-hxw` = vr_where: on the release, so Y itself is
+       E and F come from the off hand's X, bound to +hxw (`-hxw` = vr_where: on the release, so X itself is
        not counted as held), and the end (screenshot, disconnect, quit) from its stick click (`hxend`):
        -ExpectQuit, with the screenshot still checked (Shot).
 
@@ -181,7 +184,25 @@ $tuneCommands = @(
     'screenshot',  # hexen00: identical pose with both indicators disabled
     'vr_offhand_marker 1; vr_aimdot 1',
     ((@('wait') * 30) -join '; '),  # at least 2 s at 15 fps; 5 s at 6 fps
-    'screenshot; wait; wait; wait; disconnect; quit'
+    'screenshot; wait; wait; wait',
+    # B+Y chord (main B = right b, off-hand Y = left b; B goes first so +crouch is pressed and then released).
+    # Controller bindings append to the Cbuf behind a waiting script, so the presses are delayed mock events
+    # (seconds) that run after this cfg has ended; X prints a report (marker + vr_where) at each checkpoint, and
+    # the off-hand trigger execs the second cfg (the mock queue holds 16 events). Y has no binding of its own:
+    # a leak shows as HXW_CHORD_Y_LEAK. This is after the final shot (hexen01): the chord's screenshot is the next slot.
+    'bind VR_B +crouch; bind VR_Y "echo HXW_CHORD_Y_LEAK"; bind VR_X "echo HXW_chord_rep; vr_where"; bind VR_OTRIGGER "exec smoke_vr_wchord2.cfg"; vr_mock_hand right b 0; vr_mock_hand left b 0',
+    # rep1: B alone (crouchkey 1); Y pressed and let go at 0.3 s, rep2: B still held, +crouch released, nothing toggled
+    ('vr_mock_hand right b 1 1; vr_mock_hand left a 1 2; vr_mock_hand left a 0 2.3; vr_mock_hand left b 1 3; vr_mock_hand left b 0 3.3; ' +
+     'vr_mock_hand left a 1 5; vr_mock_hand left a 0 5.3; vr_mock_hand right b 0 5.8'),
+    # chord 1 (7.5 s .. 11 s): tuning on; rep3 while the pair is held; then the second cfg
+    ('vr_mock_hand right b 1 7; vr_mock_hand left b 1 7.5; vr_mock_hand left a 1 10; vr_mock_hand left a 0 10.3; ' +
+     'vr_mock_hand right b 0 11; vr_mock_hand left b 0 11; vr_mock_hand left trigger 1 12')
+)
+$chord2Commands = @(
+    'vr_mock_hand left trigger 0; alias wquit "disconnect; quit"; bind VR_OSTICK wquit',
+    # chord 2: tuning off, save, screenshot, pulses; rep4 while the pair is held; then the stick click quits
+    ('vr_mock_hand right b 1 1; vr_mock_hand left b 1 1.5; vr_mock_hand left a 1 5; vr_mock_hand left a 0 5.3; ' +
+     'vr_mock_hand right b 0 5.8; vr_mock_hand left b 0 5.8; vr_mock_hand left stick 1 8')
 )
 # Trace a clear wall fixture instead of relying on timed movement into demo1 stairs.
 # The mock-only fixture uses noclip to eliminate gravity; two samples verify rest.
@@ -209,6 +230,7 @@ $meleeCommands = @(
 )
 $wCfgs['smoke_vr_wmelee.cfg'] = (@($meleeCommands | ForEach-Object { $_; 'wait'; 'wait'; 'wait' }) -join "`n")
 $wCfgs['smoke_vr_wtune.cfg'] = (@($tuneCommands | ForEach-Object { $_; 'wait'; 'wait'; 'wait' }) -join "`n")
+$wCfgs['smoke_vr_wchord2.cfg'] = (@($chord2Commands | ForEach-Object { $_; 'wait'; 'wait'; 'wait' }) -join "`n")
 
 $all = [ordered]@{
     w = @{ Commands = @('exec smoke_vr_w1.cfg'); Stereo = $true; Weapon = $true; ExpectQuit = $true; Shot = $true; WaitLines = 3; TimeoutSec = 900; Pending = $false }
@@ -254,14 +276,14 @@ $all = [ordered]@{
             'vr_mock_head 0 0 -1 2',                                   # stand up over 2 s
             ((@('wait') * 200) -join '; '),
             'vr_where',                                                # D: crouch 0, view >= 45
-            # Y (off hand) released = vr_where; left stick click = the end (VR is up: the defaults are set)
-            'bind VR_Y +hxw; alias +hxw ""; alias -hxw vr_where; alias hxend "screenshot; wait; wait; wait; disconnect; quit"; bind VR_OSTICK hxend',
-            # after the script (delays in s): B pressed in the game, Y (E: crouchkey 1), Menu (the main menu opens),
-            # B released in the menu, Menu (the menu closes), Y (F: held 0, crouchkey 0), stick click (quit)
-            ('vr_mock_hand right b 1 0.6; vr_mock_hand left b 1 1.2; vr_mock_hand left b 0 1.8; ' +
+            # X (off hand) released = vr_where; left stick click = the end (VR is up: the defaults are set)
+            'bind VR_X +hxw; alias +hxw ""; alias -hxw vr_where; alias hxend "screenshot; wait; wait; wait; disconnect; quit"; bind VR_OSTICK hxend',
+            # after the script (delays in s): B pressed in the game, X (E: crouchkey 1), Menu (the main menu opens),
+            # B released in the menu, Menu (the menu closes), X (F: held 0, crouchkey 0), stick click (quit)
+            ('vr_mock_hand right b 1 0.6; vr_mock_hand left a 1 1.2; vr_mock_hand left a 0 1.8; ' +
              'vr_mock_hand left menu 1 2.4; vr_mock_hand left menu 0 3.0; vr_mock_hand right b 0 3.6; ' +
-             'vr_mock_hand left menu 1 4.2; vr_mock_hand left menu 0 4.8; vr_mock_hand left b 1 5.4; ' +
-             'vr_mock_hand left b 0 6.0; vr_mock_hand left stick 1 6.6'));
+             'vr_mock_hand left menu 1 4.2; vr_mock_hand left menu 0 4.8; vr_mock_hand left a 1 5.4; ' +
+             'vr_mock_hand left a 0 6.0; vr_mock_hand left stick 1 6.6'));
         Stereo = $true; RoomWalk = $true; ExpectQuit = $true; Shot = $true; WaitLines = 3; TimeoutSec = 300; Pending = $false }
     # quit from the controller in the main menu (no map). The first line runs before VR starts (same
     # command buffer pass as +vr_enabled 1); the mock commands run once it is up. Hexen.rc opens the
@@ -473,6 +495,29 @@ function Test-VrLog([string]$path, $sc) {
         $saved = @([IO.File]::ReadAllLines($weaponCfg))
         $afterEntry = [regex]::Match($text, '(?ms)^HXW_tune_after[^\S\n]*\n(vr_weapon_offset "models/crossbow\.mdl" [^\r\n]+)')
         if ($saved.Count -ne 1 -or -not $afterEntry.Success -or $saved[0] -cne $afterEntry.Groups[1].Value) { return 'saved cfg does not match the moved entry from vr_weapon_list' }
+        # B+Y chord (end of the tune cfgs). Reports rep1..rep4 (X: marker + vr_where): B alone; after the pair released
+        # early; chord 1 held; chord 2 held.
+        if ($text -cmatch 'HXW_CHORD_Y_LEAK') { return 'the chord leaked Y to its binding' }
+        $reps = @([regex]::Matches($text, '(?m)^HXW_chord_rep[^\S\n]*\n[^\n]*VR: where [^\n]* crouchkey (\d+)[^\n]*$'))
+        if ($reps.Count -ne 4) { return "expected 4 chord reports, got $($reps.Count)" }
+        $ck = @($reps | ForEach-Object { [int]$_.Groups[1].Value })
+        if ($ck[0] -ne 1) { return 'B alone did not hold +crouch before the chord' }
+        if ($ck[1] -ne 0) { return 'the second press of the pair did not release +crouch ' }
+        if ($ck[2] -ne 0 -or $ck[3] -ne 0) { return 'a chord left +crouch held while the pair was down' }
+        $between = { param($a, $b) $text.Substring($a.Index + $a.Length, $b.Index - $a.Index - $a.Length) }
+        $tunePulse = '(?m)^VR: haptic [01] 0\.5 0\.06 tune\r?$'
+        $cancel = & $between $reps[0] $reps[1]
+        if ([regex]::Matches($cancel, $tunePulse).Count -ne 0 -or $cancel -cmatch 'VR: saved') { return 'a pair released before 1 s toggled tuning' }
+        $on = & $between $reps[1] $reps[2]
+        if ([regex]::Matches($on, $tunePulse).Count -ne 2) { return 'chord 1 did not give one pulse on each hand' }
+        if ($on -cmatch 'VR: saved') { return 'chord 1 saved instead of entering tuning' }
+        $off = & $between $reps[2] $reps[3]
+        if ([regex]::Matches($off, $tunePulse).Count -ne 4) { return 'chord 2 did not give two pulses on each hand' }
+        if ($off -cnotmatch '(?m)^VR: saved 1 weapon offsets to vr_weapons\.cfg\r?$') { return 'chord 2 did not save the weapon offsets' }
+        $shotLine = [regex]::Match($off, '(?m)^VR: weapon tuning screenshot (shots/hexen\d\d\.tga)\r?$')
+        if (-not $shotLine.Success) { return 'chord 2 printed no screenshot line' }
+        if (-not (Test-Path -LiteralPath (Join-Path $GameDir ('data1\' + ($shotLine.Groups[1].Value -replace '/', '\'))))) { return 'the chord screenshot file is missing' }
+        if ([regex]::Matches($text, '(?m)^VR: saved 1 weapon offsets to vr_weapons\.cfg\r?$').Count -ne 2) { return 'expected exactly two weapon saves (vr_weapon_save and chord 2)' }
         $num = '(-?\d+(?:\.\d+)?)'
         $fireRe = "^VR: fire muzzle $num $num $num body $num $num $num proj $num $num $num$"
         $melee = [regex]::Match($text, '(?ms)^HXW_melee_begin[^\S\n]*\n(.*?)^HXW_melee_end')
@@ -535,6 +580,8 @@ function Test-VrLog([string]$path, $sc) {
     $bad = @($vrLines | Where-Object { $_ -cne 'VR: started (mock)' -and $_ -cne 'VR: stopped' -and $_ -cne 'VR: recentered' -and
         $_ -cne 'VR: default controller bindings set' -and $_ -cnotmatch '^VR: where ' -and
         -not ($sc.Weapon -and $_ -ceq 'VR: saved 1 weapon offsets to vr_weapons.cfg') -and
+        -not ($sc.Weapon -and $_ -cmatch '^VR: weapon tuning screenshot shots/hexen\d\d\.tga$') -and
+        -not ($sc.Weapon -and $_ -cmatch '^VR: haptic [01] 0\.5 0\.06 tune$') -and
         -not ($sc.Weapon -and $_ -cmatch '^VR: haptic [01] (?:0(?:\.\d+)?|1) 0\.(?:04|12) (?:sound|spawn|damage)$') -and
         -not ($sc.Weapon -and $_ -cmatch '^VR: clamp raw (?:-?\d+\.\d{3} ){3}hit (?:-?\d+\.\d{3} ){3}start [01] eye (?:-?\d+\.\d{3} ){3}aim -?\d+\.\d{6} -?\d+\.\d{6} -?\d+\.\d{6}$') -and
         $_ -cnotmatch '^VR: calibration done: ' -and -not ($sc.Weapon -and $_ -cmatch '^VR: (?:last )?fire muzzle -?\d+\.\d{3} -?\d+\.\d{3} -?\d+\.\d{3} body -?\d+\.\d{3} -?\d+\.\d{3} -?\d+\.\d{3} proj -?\d+\.\d{3} -?\d+\.\d{3} -?\d+\.\d{3}$') })

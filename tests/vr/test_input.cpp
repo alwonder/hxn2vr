@@ -527,3 +527,122 @@ TEST_CASE("smooth turn") {   // speed 150, dz 0.15
 	CHECK(VR_TurnStep(&t, 1.0f, -0.1f, 1, 45.0f, 150.0f, 0.15f) == 0.0f);
 	CHECK(VR_TurnStep(&t, nan, 0.1f, 0, 45.0f, 150.0f, 0.15f) == 0.0f);   // snap too
 }
+
+TEST_CASE("chord: B then Y held 1 s fires once, on crossing") {
+	vr_chord_t c{};
+	vr_chord_out_t o{};
+	VR_ChordStep(&c, 1, 0, 0.1f, 1.0f, &o);   // B alone: bindings keep working
+	CHECK(o.suppress == 0);
+	CHECK(o.pair_started == 0);
+	CHECK(o.fire == 0);
+	VR_ChordStep(&c, 1, 1, 0.1f, 1.0f, &o);   // Y goes down: pair starts, nothing counted yet
+	CHECK(o.suppress == 1);
+	CHECK(o.pair_started == 1);
+	CHECK(o.fire == 0);
+	VR_ChordStep(&c, 1, 1, 0.5f, 1.0f, &o);
+	CHECK(o.suppress == 1);
+	CHECK(o.pair_started == 0);
+	CHECK(o.fire == 0);
+	VR_ChordStep(&c, 1, 1, 0.25f, 1.0f, &o);
+	CHECK(o.fire == 0);                       // 0.75 s
+	VR_ChordStep(&c, 1, 1, 0.25f, 1.0f, &o);
+	CHECK(o.fire == 1);                       // exactly 1.0 s
+	CHECK(o.suppress == 1);
+	VR_ChordStep(&c, 1, 1, 0.5f, 1.0f, &o);   // holding on: no second fire
+	CHECK(o.fire == 0);
+	CHECK(o.suppress == 1);
+	VR_ChordStep(&c, 1, 1, 5.0f, 1.0f, &o);
+	CHECK(o.fire == 0);
+}
+
+TEST_CASE("chord: Y then B fires the same way") {
+	vr_chord_t c{};
+	vr_chord_out_t o{};
+	VR_ChordStep(&c, 0, 1, 0.1f, 1.0f, &o);
+	CHECK(o.suppress == 0);
+	VR_ChordStep(&c, 1, 1, 0.1f, 1.0f, &o);
+	CHECK(o.suppress == 1);
+	CHECK(o.pair_started == 1);
+	VR_ChordStep(&c, 1, 1, 0.5f, 1.0f, &o);
+	CHECK(o.fire == 0);
+	VR_ChordStep(&c, 1, 1, 0.5f, 1.0f, &o);
+	CHECK(o.fire == 1);
+}
+
+TEST_CASE("chord: both pressed in the same frame starts the pair") {
+	vr_chord_t c{};
+	vr_chord_out_t o{};
+	VR_ChordStep(&c, 1, 1, 0.1f, 1.0f, &o);
+	CHECK(o.pair_started == 1);
+	CHECK(o.suppress == 1);
+	VR_ChordStep(&c, 1, 1, 1.0f, 1.0f, &o);
+	CHECK(o.fire == 1);
+}
+
+TEST_CASE("chord: releasing early cancels; nothing reaches bindings until both are up") {
+	vr_chord_t c{};
+	vr_chord_out_t o{};
+	VR_ChordStep(&c, 1, 1, 0.1f, 1.0f, &o);
+	VR_ChordStep(&c, 1, 1, 0.5f, 1.0f, &o);
+	VR_ChordStep(&c, 0, 1, 0.1f, 1.0f, &o);   // B up at 0.5 s
+	CHECK(o.fire == 0);
+	CHECK(o.suppress == 1);                   // Y is still held: no invright / crouch
+	VR_ChordStep(&c, 1, 1, 0.1f, 1.0f, &o);   // B pressed again while Y is held: still swallowed
+	CHECK(o.suppress == 1);
+	CHECK(o.pair_started == 0);
+	VR_ChordStep(&c, 1, 1, 3.0f, 1.0f, &o);   // a cancelled pair never fires
+	CHECK(o.fire == 0);
+	CHECK(o.suppress == 1);
+	VR_ChordStep(&c, 1, 0, 0.1f, 1.0f, &o);
+	CHECK(o.suppress == 1);
+	VR_ChordStep(&c, 0, 0, 0.1f, 1.0f, &o);   // both up: bindings work again
+	CHECK(o.suppress == 0);
+	CHECK(o.fire == 0);
+	VR_ChordStep(&c, 1, 0, 0.1f, 1.0f, &o);
+	CHECK(o.suppress == 0);
+}
+
+TEST_CASE("chord: fires again only after both buttons were released") {
+	vr_chord_t c{};
+	vr_chord_out_t o{};
+	VR_ChordStep(&c, 1, 1, 0.1f, 1.0f, &o);
+	VR_ChordStep(&c, 1, 1, 1.0f, 1.0f, &o);
+	CHECK(o.fire == 1);
+	VR_ChordStep(&c, 0, 1, 0.1f, 1.0f, &o);   // one up, one still down
+	CHECK(o.suppress == 1);
+	VR_ChordStep(&c, 1, 1, 2.0f, 1.0f, &o);   // pressed again: no new fire
+	CHECK(o.fire == 0);
+	VR_ChordStep(&c, 0, 0, 0.1f, 1.0f, &o);
+	CHECK(o.suppress == 0);
+	VR_ChordStep(&c, 1, 1, 0.1f, 1.0f, &o);
+	CHECK(o.pair_started == 1);
+	VR_ChordStep(&c, 1, 1, 0.9f, 1.0f, &o);
+	CHECK(o.fire == 0);
+	VR_ChordStep(&c, 1, 1, 0.1f, 1.0f, &o);
+	CHECK(o.fire == 1);
+}
+
+TEST_CASE("chord: bad dt counts as 0, bad hold never fires") {
+	vr_chord_t c{};
+	vr_chord_out_t o{};
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	const float inf = std::numeric_limits<float>::infinity();
+	VR_ChordStep(&c, 1, 1, 0.1f, 1.0f, &o);
+	VR_ChordStep(&c, 1, 1, nan, 1.0f, &o);
+	CHECK(o.fire == 0);
+	VR_ChordStep(&c, 1, 1, -5.0f, 1.0f, &o);
+	CHECK(o.fire == 0);
+	VR_ChordStep(&c, 1, 1, inf, 1.0f, &o);
+	CHECK(o.fire == 0);
+	VR_ChordStep(&c, 1, 1, 0.9f, 1.0f, &o);
+	CHECK(o.fire == 0);                       // still only 0.9 s
+	VR_ChordStep(&c, 1, 1, 0.1f, 1.0f, &o);
+	CHECK(o.fire == 1);
+	vr_chord_t d{};
+	VR_ChordStep(&d, 1, 1, 0.1f, nan, &o);
+	VR_ChordStep(&d, 1, 1, 10.0f, nan, &o);
+	CHECK(o.fire == 0);
+	VR_ChordStep(&d, 1, 1, 0.1f, 1.0f, nullptr);   // null out is harmless
+	VR_ChordStep(nullptr, 1, 1, 0.1f, 1.0f, &o);
+	CHECK(o.suppress == 0);
+}

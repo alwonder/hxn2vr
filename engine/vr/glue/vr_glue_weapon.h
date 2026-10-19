@@ -8,6 +8,8 @@ void VRG_WeaponInit (void);
 qboolean VRG_WeaponTuning (void);
 void VRG_WeaponTuneFrame (float dt);
 void VRG_WeaponTuneReset (void);
+void VRG_WeaponTuneChord (void);
+void VRG_WeaponChordFrame (void);
 void VRG_WeaponPose (float muzzle_world[3], float aim_angles[3], qboolean *valid);
 /* Shared sent-view selection: weapon aim when tracked, otherwise body plus head. */
 void VRG_AimAngles (float angles[3]);

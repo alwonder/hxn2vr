@@ -129,6 +129,17 @@ typedef struct { int fired; } vr_turn_t;
  * counts as 0). 0 for non-finite input. */
 float VR_TurnStep(vr_turn_t *t, float stick_x, float dt, int smooth, float snap_deg, float speed_dps, float deadzone);
 
+/* Tuning chord: both upper buttons (main hand B and off hand Y) held for hold_seconds. Call once per input
+ * frame with the physical state of the two buttons (0 when the chord is not allowed: reset the struct
+ * with memset instead). Out: suppress = B and Y must send nothing to bindings (from the frame the second
+ * button of the pair goes down until both are up); pair_started = that frame (the first button's key
+ * is to be released); fire = the hold time was reached (once per pair, exactly on crossing; the pair must
+ * be released before it can fire again). Releasing either button before the time cancels the pair.
+ * dt < 0 or non-finite counts as 0; a non-finite hold_seconds never fires. */
+typedef struct { int latched; int alive; int fired; float held; } vr_chord_t;
+typedef struct { int suppress; int pair_started; int fire; } vr_chord_out_t;
+void VR_ChordStep(vr_chord_t *c, int main_down, int off_down, float dt, float hold_seconds, vr_chord_out_t *out);
+
 /* Per frame, after VR_BeginFrame returned render != 0, for eye 0 then 1:
  * VR_BeginEye acquires the eye image, binds its framebuffer and sets the viewport; returns 1 if
  * the eye target is bound (draw into it), 0 if not (do not draw). VR_EndEye mirrors the eye into

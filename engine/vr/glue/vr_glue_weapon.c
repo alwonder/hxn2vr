@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#define VRG_TUNE_PROMPT "Weapon tuning: hold the off-hand grip to move the weapon,@off-hand stick up/down to scale, vr_weapon_save to keep"
+#define VRG_TUNE_PROMPT "Weapon tuning: hold the off-hand grip to move the weapon,@off-hand stick up/down to scale, hold B+Y to save@(or the console command vr_weapon_save)"
 
 cvar_t vr_compat = {"vr_compat", "1", CVAR_ARCHIVE};
 cvar_t vr_gunangle = {"vr_gunangle", "0", CVAR_ARCHIVE};
@@ -86,20 +86,109 @@ void VRG_WeaponTuneReset (void)
 	vrg_tune_model = NULL;
 }
 
+static void VRG_WeaponSave_f (void);
+
+static void VRG_PulseBoth (void)
+{
+	VRG_Haptic (VR_HAND_LEFT, 0.5f, 0.06f, "tune");
+	VRG_Haptic (VR_HAND_RIGHT, 0.5f, 0.06f, "tune");
+}
+
+static void VRG_WeaponTuneEnter (void)
+{
+	vrg_tuning = true;
+	vrg_tune_hand = VRG_MainHand ();
+	SCR_CenterPrint (VRG_TUNE_PROMPT);
+}
+
+/* Leaves tuning: an in-progress grab is committed as on a grip release. */
+static void VRG_WeaponTuneLeave (void)
+{
+	if (vrg_grabbed && vrg_tune_model)
+		VR_WeaponSet (vrg_tune_model->name, &vrg_tune_entry);
+	VRG_WeaponTuneReset ();
+	SCR_CenterPrint ("");
+}
+
 static void VRG_WeaponTune_f (void)
 {
 	if (vrg_tuning)
 	{
-		if (vrg_grabbed && vrg_tune_model)
-			VR_WeaponSet (vrg_tune_model->name, &vrg_tune_entry);
-		VRG_WeaponTuneReset ();
-		SCR_CenterPrint ("");
+		VRG_WeaponTuneLeave ();
 		return;
 	}
 	if (!VR_IsRunning ()) return;
-	vrg_tuning = true;
-	vrg_tune_hand = VRG_MainHand ();
-	SCR_CenterPrint (VRG_TUNE_PROMPT);
+	VRG_WeaponTuneEnter ();
+}
+
+/* The B+Y chord (vr_glue_input.c): on enters tuning; off saves, then a few frames later takes a mirror
+ * screenshot and pulses twice. */
+#define VRG_SHOT_FRAMES 3
+#define VRG_PULSE_GAP 0.15
+static int vrg_shot_frames;
+static double vrg_pulse_due;
+
+void VRG_WeaponTuneChord (void)
+{
+	if (!VR_IsRunning ()) return;
+	if (!vrg_tuning)
+	{
+		VRG_WeaponTuneEnter ();
+		VRG_PulseBoth ();
+		return;
+	}
+	VRG_WeaponTuneLeave ();
+	VRG_WeaponSave_f ();
+	vrg_shot_frames = VRG_SHOT_FRAMES;
+	VRG_PulseBoth ();
+	vrg_pulse_due = Sys_DoubleTime () + VRG_PULSE_GAP;
+}
+
+/* The slot "screenshot" will use (the same scan as SCR_ScreenShot_f). */
+#if !defined(H2W)
+static const char vrg_shotbase[] = "shots/hexen00.tga";
+#define VRG_SHOTNUM_POS 11
+#else
+static const char vrg_shotbase[] = "shots/hw00.tga";
+#define VRG_SHOTNUM_POS 8
+#endif
+
+static void VRG_TuneShot (void)
+{
+	char name[80], path[MAX_OSPATH];
+	int i;
+
+	if (vr_mirror.integer != 1 && vr_mirror.integer != 2)
+	{
+		Con_SafePrintf ("VR: weapon tuning screenshot skipped (vr_mirror 0)\n");
+		return;
+	}
+	q_strlcpy (name, vrg_shotbase, sizeof(name));
+	for (i = 0; i <= 99; i++)
+	{
+		name[VRG_SHOTNUM_POS + 0] = i / 10 + '0';
+		name[VRG_SHOTNUM_POS + 1] = i % 10 + '0';
+		FS_MakePath_BUF (FS_USERDIR, NULL, path, sizeof(path), name);
+		if (Sys_FileType (path) == FS_ENT_NONE)
+			break;
+	}
+	Cmd_ExecuteString ("screenshot", src_command);
+	if (i < 100 && Sys_FileType (path) != FS_ENT_NONE)
+		Con_SafePrintf ("VR: weapon tuning screenshot %s\n", name);
+	else
+		Con_SafePrintf ("VR: weapon tuning screenshot failed\n");
+}
+
+/* Once per input frame: the deferred screenshot and the second exit pulse. */
+void VRG_WeaponChordFrame (void)
+{
+	if (vrg_pulse_due > 0 && Sys_DoubleTime () >= vrg_pulse_due)
+	{
+		vrg_pulse_due = 0;
+		VRG_PulseBoth ();
+	}
+	if (vrg_shot_frames > 0 && --vrg_shot_frames == 0)
+		VRG_TuneShot ();
 }
 
 static void VRG_WeaponSave_f (void)
